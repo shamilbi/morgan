@@ -44,7 +44,7 @@ class Mirrorer:
         self.index_path = args.index_path
         self.index_url = args.index_url
         self.config = configparser.ConfigParser()
-        self.config.read(os.path.join(self.index_path, "morgan.ini"))
+        self.config.read(args.config)
         self.envs = {}
         self._supported_pyversions = []
         self._supported_platforms = []
@@ -500,6 +500,11 @@ def main():
         default=PYPI_ADDRESS,
         type=my_url,
         help='Base URL of the Python Package Index')
+    parser.add_argument(
+        '-c', '--config',
+        dest='config',
+        nargs='?',
+        help='Config file (default: <INDEX_PATH>/morgan.ini)')
 
     server.add_arguments(parser)
     configurator.add_arguments(parser)
@@ -511,6 +516,9 @@ def main():
         help="Command to execute")
 
     args = parser.parse_args()
+
+    if not args.config:
+        args.config = os.path.join(args.index_path, 'morgan.ini')
 
     if args.command == "serve":
         server.run(args.index_path, args.host, args.port, args.no_metadata)
