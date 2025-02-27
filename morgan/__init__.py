@@ -161,7 +161,10 @@ class Mirrorer:
         files = self._filter_files(requirement, files)
         if files is None:
             if required_by is None:
-                raise Exception("No files match requirement")
+                # PySimpleGUI has moved to a private server
+                #raise Exception("No files match requirement")
+                print('\tNo files, check PYPI')
+                return None
             else:
                 # this is a dependency, assume the dependency is not relevant
                 # for any of our environments and don't return an error
