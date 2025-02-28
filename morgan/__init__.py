@@ -170,7 +170,7 @@ class Mirrorer:
                 # for any of our environments and don't return an error
                 return None
 
-        if len(files) == 0:
+        if not files:
             raise Exception(f"No files match requirement {requirement}")
 
         # download all files
@@ -251,16 +251,16 @@ class Mirrorer:
                 )
             )
 
-        if len(files) == 0:
-            print(f"Skipping {requirement}, no version matches requirement")
+        if not files:
+            print(f"\tSkipping {requirement}, no version matches requirement")
             return None
 
         # Now we only have files that satisfy the requirement, and we need to
         # filter out files that do not match our environments.
         files = list(filter(lambda file: self._matches_environments(file), files))
 
-        if len(files) == 0:
-            print(f"Skipping {requirement}, no file matches environments")
+        if not files:
+            print(f"\tSkipping {requirement}, no file matches environments")
             return None
 
         # Only keep files from the latest version that satisifies all
