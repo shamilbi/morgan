@@ -19,7 +19,7 @@ def to_single_dash(filename):
     # selenium-2.0.dev9429.tar.gz
 
 
-class Cache:
+class Cache:  # pylint: disable=protected-access
     def __init__(self):
         self.cache: set[str] = set()
 
@@ -27,7 +27,7 @@ class Cache:
         if self.is_simple_case(req):
             return req.name in self.cache
         return str(req) in self.cache
-    
+
     def add(self, req: Requirement):
         if self.is_simple_case(req):
             self.cache.add(req.name)
