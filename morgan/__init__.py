@@ -122,14 +122,13 @@ class Mirrorer:
         requirement: packaging.requirements.Requirement,
         required_by: packaging.requirements.Requirement = None,
     ) -> dict:
+        if self._processed_pkgs.check(requirement):
+            return None
+
         if required_by:
             print("[{}]: {}".format(required_by, requirement))
         else:
             print("{}".format(requirement))
-
-        if self._processed_pkgs.check(requirement):
-            #print(f'\tskipped')
-            return None
 
         data: dict = None
 
