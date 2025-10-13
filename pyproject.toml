@@ -24,7 +24,8 @@ dependencies = [
         # packaging.utils.InvalidSdistFilename: Invalid sdist filename (invalid version): 'expandvars-0.6.0-macosx-10.15-x86_64.tar.gz' (old versions)
         # solved in morgan/__init__.py
     #"importlib-metadata~=4.12.0; python_version < '3.8'",
-    "tomli~=2.0.1",
+    #"tomli~=2.0.1",
+    "tomli<3",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
