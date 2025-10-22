@@ -26,6 +26,7 @@ dependencies = [
     #"importlib-metadata~=4.12.0; python_version < '3.8'",
     #"tomli~=2.0.1",
     "tomli<3",
+    "python-dateutil",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
