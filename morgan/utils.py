@@ -46,11 +46,11 @@ class Cache:  # pylint: disable=protected-access
         return False
 
 
-def touch_file(file: str, fileinfo: dict):
+def touch_file(path: str, fileinfo: dict):
     'upload-time: 2025-05-28T18:46:29.349478Z'
     time_str = fileinfo.get('upload-time')
-    if not file or not time_str:
+    if not path or not time_str:
         return
     dt = dateutil.parser.parse(time_str)
     ts = dt.timestamp()
-    os.utime(file, (ts, ts))
+    os.utime(path, (ts, ts))
