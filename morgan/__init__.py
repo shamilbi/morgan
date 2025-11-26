@@ -10,7 +10,7 @@ import traceback
 import urllib.parse
 import urllib.request
 import zipfile
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable
 
 import packaging.requirements
 import packaging.specifiers
@@ -26,7 +26,7 @@ PYPI_ADDRESS = "https://pypi.org/simple/"
 PREFERRED_HASH_ALG = "sha256"
 
 
-class Mirrorer:
+class Mirrorer:  # pylint: disable=too-few-public-methods
     """
     Mirrorer is a class that implements the mirroring capabilities of Morgan.
     A class is used to maintain state, as the mirrorer needs to keep track of
@@ -47,7 +47,8 @@ class Mirrorer:
         self.config.read(config)
         self.envs = {}
         self._supported_pyversions = []
-        self._supported_platforms = []
+        self.whl_tags = []  # list[(interpreter, abi, platform)]
+
         for key in self.config:
             m = re.fullmatch(r"env\.(.+)", key)
             if m:
@@ -61,13 +62,15 @@ class Mirrorer:
                     self._supported_pyversions.append(env["python_full_version"])
                 else:
                     self._supported_pyversions.append(env["python_version"])
-                if "platform_tag" in env:
-                    self._supported_platforms.append(re.compile(env["platform_tag"]))
-                self._supported_platforms.append(
-                    re.compile(
-                        r".*" + env["sys_platform"] + r".*" + env["platform_machine"]
-                    )
-                )
+                # whl.tag.*
+                l = []  # list[re.Pattern]
+                for i in ('interpreter', 'abi', 'platform'):
+                    t = env.get(f'whl.tag.{i}', '').strip()
+                    if t:
+                        l.append(re.compile(t))
+                    else:
+                        l.append(None)
+                self.whl_tags.append(l)
 
         self._processed_pkgs = Cache()
 
@@ -267,25 +270,11 @@ class Mirrorer:
                 return False
 
         if fileinfo.get("tags", None):
-            # At least one of the tags must match ALL of our environments
             for tag in fileinfo["tags"]:
-                (intrp_name, intrp_ver) = parse_interpreter(tag.interpreter)
-                if intrp_name not in ("py", "cp"):
-                    continue
-                if (
-                    intrp_ver
-                    and intrp_ver != "3"
-                    and intrp_ver not in self._supported_pyversions
-                ):
-                    continue
-
-                if tag.platform == "any":
-                    return True
-                else:
-                    for platformre in self._supported_platforms:
-                        if platformre.fullmatch(tag.platform):
-                            # tag matched, accept this file
-                            return True
+                for t in self.whl_tags:
+                    t2 = zip(t[:3], [tag.interpreter, tag.abi, tag.platform])
+                    if all(i.match(j) for i, j in t2 if i):
+                        return True
 
             # none of the tags matched, reject this file
             return False
@@ -405,27 +394,6 @@ class Mirrorer:
         archive.close()
 
         return md
-
-
-def parse_interpreter(inp: str) -> Tuple[str, str]:
-    """
-    Parse interpreter tags in the name of a binary wheel file. Returns a tuple
-    of interpreter name and optional version, which will either be <major> or
-    <major>.<minor>.
-    """
-
-    m = re.fullmatch(r"^([^\d]+)(?:(\d)(?:[._])?(\d+)?)$", inp)
-    if m is None:
-        return (inp, None)
-
-    intr = m.group(1)
-    version = None
-    if m.lastindex > 1:
-        version = m.group(2)
-        if m.lastindex > 2:
-            version = "{}.{}".format(version, m.group(3))
-
-    return (intr, version)
 
 
 def parse_requirement(req_string: str) -> packaging.requirements.Requirement:
