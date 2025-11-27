@@ -112,9 +112,9 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
             return None
 
         if required_by:
-            print("[{}]: {}".format(required_by, requirement))
+            print(f"[{required_by}]: {requirement}")
         else:
-            print("{}".format(requirement))
+            print(f"{requirement}")
 
         data: dict = RCACHE.get(self.index_url, requirement.name)
         response_url = data['response_url']
@@ -245,8 +245,9 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
         return files
 
     def _matches_environments(self, fileinfo: dict) -> bool:
-        if req := fileinfo.get("requires-python", None):
-            # The Python versions in all of our environments must be supported
+        req = fileinfo.get("requires-python", None)
+        if req:
+            # The Python versions in some of our environments must be supported
             # by this file in order to match.
             # Some packages specify their required Python versions with a simple
             # number (e.g. '3') instead of an actual specifier (e.g. '>=3'),
@@ -260,12 +261,14 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
             req = fileinfo["requires-python"] = re.sub(r'([0-9])\.?\*', r'\1', req)
             try:
                 spec_set = packaging.specifiers.SpecifierSet(req)
-                for supported_python in self._supported_pyversions:
-                    if not spec_set.contains(supported_python):
-                        # file does not support the Python version of one of our
-                        # environments, reject it
-                        return False
-            except Exception as e:
+                # for supported_python in self._supported_pyversions:
+                #     if not spec_set.contains(supported_python):
+                #         # file does not support the Python version of one of our
+                #         # environments, reject it
+                #         return False
+                if not any(spec_set.contains(i) for i in self._supported_pyversions):
+                    return False
+            except packaging.specifiers.InvalidSpecifier as e:
                 print(f"\tIgnoring {fileinfo['filename']}: {e}")
                 return False
 
@@ -354,8 +357,8 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
         truehash = hashlib.new(hashalg)
         truehash.update(contents)
 
-        with open("{}.hash".format(filepath), "w") as out:
-            out.write("{}={}".format(hashalg, truehash.hexdigest()))
+        with open(f"{filepath}.hash", "w") as out:
+            out.write(f"{hashalg}={truehash.hexdigest()}")
 
         return truehash.hexdigest()
 
@@ -380,16 +383,16 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
             members = [member.name for member in archive.getmembers()]
             opener = archive.extractfile
         else:
-            raise Exception("Unexpected distribution file {}".format(filepath))
+            raise Exception(f"Unexpected distribution file {filepath}")
 
         for member in members:
             try:
                 md.parse(opener, member)
             except Exception as e:
-                print("Failed parsing member {} of {}: {}".format(member, filepath, e))
+                print(f"Failed parsing member {member} of {filepath}: {e}")
 
         if md.seen_metadata_file():
-            md.write_metadata_file("{}.metadata".format(filepath))
+            md.write_metadata_file(f"{filepath}.metadata")
 
         archive.close()
 
@@ -531,7 +534,7 @@ def main():
         server.run(args.index_path, args.host, args.port, args.no_metadata)
         return
     elif args.command == "version":
-        print("Morgan v{}".format(__version__))
+        print(f"Morgan v{__version__}")
         return
 
     if not args.config:
