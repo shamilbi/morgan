@@ -3,7 +3,6 @@ import configparser
 import os
 import platform
 import sys
-import sysconfig
 from collections import OrderedDict
 from importlib import metadata
 
@@ -17,17 +16,34 @@ def generate_env(name: str = "local"):
     """
 
     config = configparser.ConfigParser()
-    config["env.{}".format(name)] = {
+    v12 = ''.join(platform.python_version_tuple()[:2])  # 313
+    env_name = f'env.{name}'
+    # template
+    d = config[env_name] = {
         'os_name': os.name,
-        'platform_tag': sysconfig.get_platform(),
-        'sys_platform': sys.platform,
-        'platform_machine': platform.machine(),
         'platform_python_implementation': platform.python_implementation(),
-        'platform_system': platform.system(),
         'python_version': '.'.join(platform.python_version_tuple()[:2]),
         'python_full_version': platform.python_version(),
         'implementation_name': sys.implementation.name,
+        'whl.tag.interpreter': f'(cp{v12}|py3)$',
+        'whl.tag.abi': f'(cp{v12}|cp{v12}t|abi3|none)$',
     }
+    d = dict(d)
+    if os.name == 'posix':
+        d['whl.tag.platform'] = '(manylinux.*_x86_64|any)$'
+        config[f"{env_name}.posix"] = d.copy()
+
+        d['os_name'] = 'nt'
+        d['whl.tag.platform'] = '(win_amd64|win32)$'
+        config[f"{env_name}.nt"] = d.copy()
+    else:
+        d['whl.tag.platform'] = '(win_amd64|win32)$'
+        config[f"{env_name}.nt"] = d.copy()
+
+        d['os_name'] = 'posix'
+        d['whl.tag.platform'] = '(manylinux.*_x86_64|any)$'
+        config[f"{env_name}.posix"] = d.copy()
+    del config[env_name]
     config.write(sys.stdout)
 
 
