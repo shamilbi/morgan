@@ -1,8 +1,11 @@
+import hashlib
 import json
 import os
 import re
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass, field
+from datetime import datetime
 
 import dateutil  # type: ignore[import-untyped]
 from packaging.requirements import Requirement
@@ -55,12 +58,17 @@ def touch_file(path: str, fileinfo: dict):
     if not path or not time_str:
         return
     dt = dateutil.parser.parse(time_str)
+    touch_file_dt(path, dt)
+
+
+def touch_file_dt(path: str, dt: datetime):
     ts = dt.timestamp()
     os.utime(path, (ts, ts))
 
 
+@dataclass
 class RequestCache:  # pylint: disable=too-few-public-methods
-    d: dict[str, dict] = {}  # name: data
+    d: dict[str, dict] = field(default_factory=dict)  # name: data
 
     def get(self, url: str, name: str) -> dict:
         if name in self.d:
@@ -85,3 +93,40 @@ class RequestCache:  # pylint: disable=too-few-public-methods
 
 
 RCACHE = RequestCache()
+
+
+def hash_file(path: str, alg: str) -> str:
+    hash_ = hashlib.new(alg)
+    with open(path, "rb") as fh:
+        hash_.update(fh.read())
+    return hash_.hexdigest()
+
+
+@dataclass
+class HashCache:  # pylint: disable=too-few-public-methods
+    paths: set[str] = field(default_factory=set)  # name
+
+    def hash_file(self, filepath: str, hashalg: str, exphash: str) -> bool:
+        if filepath in self.paths:
+            return True
+
+        hash_ = hash_file(filepath, hashalg)
+        if hash_ != exphash:
+            return False
+
+        hfile = f"{filepath}.hash"
+        bytes_ = f'{hashalg}={hash_}'.encode()
+        if os.path.exists(hfile):
+            with open(hfile, "rb") as fp:
+                if bytes_ == fp.read():  # most cases
+                    self.paths.add(filepath)
+                    touch_file_dt(hfile, datetime.now())
+                    return True
+
+        with open(hfile, "wb") as out:
+            out.write(bytes_)
+        self.paths.add(filepath)
+        return True
+
+
+HCACHE = HashCache()
