@@ -1,6 +1,5 @@
 import argparse
 import configparser
-import hashlib
 import inspect
 import os
 import os.path
@@ -20,7 +19,7 @@ import packaging.version
 
 from morgan import configurator, metadata, server
 from morgan.__about__ import __version__
-from morgan.utils import RCACHE, Cache, to_single_dash, touch_file
+from morgan.utils import HCACHE, RCACHE, Cache, to_single_dash, touch_file
 
 PYPI_ADDRESS = "https://pypi.org/simple/"
 PREFERRED_HASH_ALG = "sha256"
@@ -326,8 +325,7 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
         # if target already exists, verify its hash and only download if
         # there's a mismatch
         if os.path.exists(target):
-            truehash = self._hash_file(target, hashalg)
-            if truehash == exphash:
+            if HCACHE.hash_file(target, hashalg, exphash):
                 touch_file(target, fileinfo)
                 return True
 
@@ -336,8 +334,7 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
             out.write(inp.read())
         print("done")
 
-        truehash = self._hash_file(target, hashalg)
-        if truehash != exphash:
+        if not HCACHE.hash_file(target, hashalg, exphash):
             os.remove(target)
             raise ValueError(
                 "Digest mismatch for {}. Deleting file {}.".format(
@@ -347,20 +344,6 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
 
         touch_file(target, fileinfo)
         return True
-
-    def _hash_file(self, filepath: str, hashalg: str) -> str:
-        contents = None
-        with open(filepath, "rb") as fh:
-            # verify downloaded file has same hash
-            contents = fh.read()
-
-        truehash = hashlib.new(hashalg)
-        truehash.update(contents)
-
-        with open(f"{filepath}.hash", "w") as out:
-            out.write(f"{hashalg}={truehash.hexdigest()}")
-
-        return truehash.hexdigest()
 
     def _extract_metadata(
         self,
