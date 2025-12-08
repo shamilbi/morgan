@@ -4,11 +4,9 @@ import inspect
 import os
 import os.path
 import re
-import tarfile
 import traceback
 import urllib.parse
 import urllib.request
-import zipfile
 from typing import Dict, Iterable
 
 import packaging.requirements
@@ -17,9 +15,9 @@ import packaging.tags
 import packaging.utils
 import packaging.version
 
-from morgan import configurator, metadata, server
+from morgan import configurator, server
 from morgan.__about__ import __version__
-from morgan.utils import HCACHE, RCACHE, Cache, to_single_dash, touch_file
+from morgan.utils import HCACHE, MCACHE, RCACHE, Cache, to_single_dash, touch_file
 
 PYPI_ADDRESS = "https://pypi.org/simple/"
 PREFERRED_HASH_ALG = "sha256"
@@ -297,7 +295,7 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
 
         self._download_file(fileinfo, filepath, hashalg)
 
-        md = self._extract_metadata(filepath, requirement.name, fileinfo["version"])
+        md = MCACHE.extract_metadata(filepath)
 
         deps = md.dependencies(requirement.extras, self.envs.values())
         if deps is None:
@@ -344,42 +342,6 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
 
         touch_file(target, fileinfo)
         return True
-
-    def _extract_metadata(
-        self,
-        filepath: str,
-        package: str,
-        version: packaging.version.Version,
-    ) -> metadata.MetadataParser:
-        md = metadata.MetadataParser(filepath)
-
-        archive = None
-        members = None
-        opener = None
-
-        if re.search(r"\.(whl|zip)$", filepath):
-            archive = zipfile.ZipFile(filepath)
-            members = [member.filename for member in archive.infolist()]
-            opener = archive.open
-        elif re.search(r"\.tar.gz$", filepath):
-            archive = tarfile.open(filepath)
-            members = [member.name for member in archive.getmembers()]
-            opener = archive.extractfile
-        else:
-            raise Exception(f"Unexpected distribution file {filepath}")
-
-        for member in members:
-            try:
-                md.parse(opener, member)
-            except Exception as e:
-                print(f"Failed parsing member {member} of {filepath}: {e}")
-
-        if md.seen_metadata_file():
-            md.write_metadata_file(f"{filepath}.metadata")
-
-        archive.close()
-
-        return md
 
 
 def parse_requirement(req_string: str) -> packaging.requirements.Requirement:
