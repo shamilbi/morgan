@@ -2,13 +2,17 @@ import hashlib
 import json
 import os
 import re
+import tarfile
 import urllib.parse
 import urllib.request
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
 
 import dateutil  # type: ignore[import-untyped]
 from packaging.requirements import Requirement
+
+from .metadata import MetadataParser, ParseException
 
 
 def to_single_dash(filename):
@@ -104,7 +108,7 @@ def hash_file(path: str, alg: str) -> str:
 
 @dataclass
 class HashCache:  # pylint: disable=too-few-public-methods
-    paths: set[str] = field(default_factory=set)  # name
+    paths: set[str] = field(default_factory=set)  # {filepath}
 
     def hash_file(self, filepath: str, hashalg: str, exphash: str) -> bool:
         if filepath in self.paths:
@@ -130,3 +134,53 @@ class HashCache:  # pylint: disable=too-few-public-methods
 
 
 HCACHE = HashCache()
+
+
+@dataclass
+class MetadataCache:  # pylint: disable=too-few-public-methods
+    # filepath: MetadataParser
+    d: dict[str, MetadataParser] = field(default_factory=dict)
+
+    # statistics
+    # filepath: count
+    # statd: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+
+    def extract_metadata(self, filepath: str) -> MetadataParser:
+        # # stat
+        # self.statd[filepath] += 1
+        # if self.statd[filepath] > 1:  # 2..17 in my test
+        #     print(f'\t{self.statd[filepath]}: {filepath}')
+
+        if filepath in self.d:
+            return self.d[filepath]
+
+        md = MetadataParser(filepath)
+
+        if re.search(r"\.(whl|zip)$", filepath):
+            with zipfile.ZipFile(filepath) as archive:
+                members = [member.filename for member in archive.infolist()]
+                opener = archive.open
+                self.handle_members(md, members, opener)
+        elif re.search(r"\.tar\.gz$", filepath):
+            with tarfile.open(filepath) as archive:
+                members = [member.name for member in archive.getmembers()]
+                opener = archive.extractfile
+                self.handle_members(md, members, opener)
+        else:
+            raise ValueError(f"Unexpected distribution file {filepath}")
+
+        if md.seen_metadata_file():
+            md.write_metadata_file(f"{filepath}.metadata")
+
+        self.d[filepath] = md
+        return md
+
+    def handle_members(self, md: MetadataParser, members: list[str], opener):
+        for member in members:
+            try:
+                md.parse(opener, member)
+            except ParseException as e:
+                print(f"\tFailed parsing member {member}: {e}")
+
+
+MCACHE = MetadataCache()
