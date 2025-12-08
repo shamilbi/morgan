@@ -15,6 +15,10 @@ METADATA_VERSION_12 = Version("1.2")
 METADATA_VERSION_21 = Version("2.1")
 
 
+class ParseException(Exception):
+    pass
+
+
 class MetadataParser:
     """
     MetadataParser is used to incrementally parse metadata sources from a Python
@@ -138,7 +142,7 @@ class MetadataParser:
         read yet, an exception will be raised.
         """
         if not hasattr(self, "_metadata_file"):
-            raise Exception("Main METADATA file has not been read yet")
+            raise ParseException("Main METADATA file has not been read yet")
 
         with open(target, "wb") as out:
             out.write(self._metadata_file)
@@ -323,7 +327,7 @@ class MetadataParser:
                     section = line[1:-1]
                     content = []
                 else:
-                    raise ValueError("Invalid section heading", line)
+                    raise ParseException("Invalid section heading", line)
             elif line:
                 content.append(line)
 
