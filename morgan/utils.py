@@ -81,7 +81,16 @@ def touch_file_dt(path: str, dt: datetime):
 class RequestCache:  # pylint: disable=too-few-public-methods
     d: dict[str, dict] = field(default_factory=dict)  # name: data
 
+    # # statistics
+    # # name: count
+    # statd: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+
     def get(self, url: str, name: str) -> dict:
+        # # stat
+        # self.statd[name] += 1
+        # if self.statd[name] > 1:  # 2..18 in my test
+        #     print(f'\t{self.statd[name]}: {name}')
+
         if name in self.d:
             return self.d[name]
 
