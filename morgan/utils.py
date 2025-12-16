@@ -11,6 +11,13 @@ from datetime import datetime
 
 import dateutil  # type: ignore[import-untyped]
 from packaging.requirements import Requirement
+from packaging.utils import (
+    InvalidSdistFilename,
+    InvalidWheelFilename,
+    parse_sdist_filename,
+    parse_wheel_filename,
+)
+from packaging.version import InvalidVersion
 
 from .metadata import MetadataParser, ParseException
 
@@ -21,12 +28,12 @@ def to_single_dash(filename):
     # selenium-2.0-dev-9429.tar.gz
     m = re.search(r'-[0-9].*-', filename)
     if m:
-        s2 = filename[m.start() + 1:]
+        s2 = filename[m.start() + 1 :]
         # 2.0-dev-9429.tar.gz
         s2 = s2.replace('-dev-', '.dev')
         # 2.0.dev9429.tar.gz
         s2 = s2.replace('-', '.')
-        filename = filename[:m.start() + 1] + s2
+        filename = filename[: m.start() + 1] + s2
     return filename
     # selenium-2.0.dev9429.tar.gz
 
@@ -91,9 +98,64 @@ class RequestCache:  # pylint: disable=too-few-public-methods
         )
 
         with urllib.request.urlopen(request) as response:
-            data = self.d[name] = json.load(response)
+            data = json.load(response)
             data['response_url'] = str(response.url)
-            return data
+
+        # check metadata version ~1.0
+        v_str = data["meta"]["api-version"]  # 1.4
+        if not v_str:
+            v_str = "1.0"
+        v_int = [int(i) for i in v_str.split(".")[:2]]
+        if v_int[0] != 1:
+            raise ValueError(f"Unsupported metadata version {v_str}, only support 1.x")
+
+        files = data["files"]
+        if files is None or not isinstance(files, list):
+            raise ValueError("Expected response to contain a list of 'files'")
+
+        self.enrich_data(data)
+        self.d[name] = data
+        return data
+
+    def enrich_data(self, data: dict):
+        def _ext(file: dict) -> bool:
+            'remove files with unsupported extensions or yanked'
+            f = file['filename'].endswith
+            y = file.get("yanked", False)
+            return not y and (f('.whl') or f('.zip') or f('.tar.gz'))
+
+        def _parse(file: dict) -> bool:
+            'parse versions and platform tags for each file'
+            name = file['filename']
+            f = name.endswith
+            try:
+                if f('.whl'):
+                    _, file["version"], _, file["tags"] = parse_wheel_filename(name)
+                    file["is_wheel"] = True
+                elif f('.zip') or f('.tar.gz'):
+                    _, file["version"] = parse_sdist_filename(
+                        # fix: selenium-2.0-dev-9429.tar.gz -> 9429
+                        to_single_dash(name)
+                    )
+                    file["is_wheel"] = False
+                    file["tags"] = None
+            except (InvalidVersion, InvalidSdistFilename, InvalidWheelFilename):
+                # old versions
+                # expandvars-0.6.0-macosx-10.15-x86_64.tar.gz
+
+                # ignore files with invalid version, PyPI no longer allows
+                # packages with special versioning schemes, and we assume we
+                # can ignore such files
+                return False
+            return True
+
+        files = data["files"]
+        filter1 = (file for file in files if _ext(file))
+        filter2 = (file for file in filter1 if _parse(file))
+
+        files2 = list(filter2)
+        files2.sort(key=lambda file: file["version"], reverse=True)
+        data["files"] = files2
 
 
 RCACHE = RequestCache()
@@ -159,13 +221,11 @@ class MetadataCache:  # pylint: disable=too-few-public-methods
         if re.search(r"\.(whl|zip)$", filepath):
             with zipfile.ZipFile(filepath) as archive:
                 members = [member.filename for member in archive.infolist()]
-                opener = archive.open
-                self.handle_members(md, members, opener)
+                self.handle_members(md, members, archive.open)
         elif re.search(r"\.tar\.gz$", filepath):
             with tarfile.open(filepath) as archive:
                 members = [member.name for member in archive.getmembers()]
-                opener = archive.extractfile
-                self.handle_members(md, members, opener)
+                self.handle_members(md, members, archive.extractfile)
         else:
             raise ValueError(f"Unexpected distribution file {filepath}")
 
