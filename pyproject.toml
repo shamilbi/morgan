@@ -67,6 +67,10 @@ line-length = 90
 skip-string-normalization = true
 target-version = ['py38']
 
+[tool.isort]
+line_length = 90
+profile = "black"
+
 [tool.ruff.lint]
 ignore = [
     "E741",  # Ambiguous variable name: `l`
