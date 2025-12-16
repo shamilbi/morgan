@@ -113,49 +113,55 @@ class RequestCache:  # pylint: disable=too-few-public-methods
         if files is None or not isinstance(files, list):
             raise ValueError("Expected response to contain a list of 'files'")
 
-        self.enrich_data(data)
+        data["files"] = enrich_files(files)
         self.d[name] = data
         return data
 
-    def enrich_data(self, data: dict):
-        def _ext(file: dict) -> bool:
-            'remove files with unsupported extensions or yanked'
-            f = file['filename'].endswith
-            y = file.get("yanked", False)
-            return not y and (f('.whl') or f('.zip') or f('.tar.gz'))
 
-        def _parse(file: dict) -> bool:
-            'parse versions and platform tags for each file'
-            name = file['filename']
-            f = name.endswith
-            try:
-                if f('.whl'):
-                    _, file["version"], _, file["tags"] = parse_wheel_filename(name)
-                    file["is_wheel"] = True
-                elif f('.zip') or f('.tar.gz'):
-                    _, file["version"] = parse_sdist_filename(
-                        # fix: selenium-2.0-dev-9429.tar.gz -> 9429
-                        to_single_dash(name)
-                    )
-                    file["is_wheel"] = False
-                    file["tags"] = None
-            except (InvalidVersion, InvalidSdistFilename, InvalidWheelFilename):
-                # old versions
-                # expandvars-0.6.0-macosx-10.15-x86_64.tar.gz
+def enrich_files(files: list[dict]) -> list[dict]:
+    '''
+    1) remove files with unsupported extensions or yanked
+    2) parse versions and platform tags for each file
+       (file["version"], file["tags"])
+    '''
 
-                # ignore files with invalid version, PyPI no longer allows
-                # packages with special versioning schemes, and we assume we
-                # can ignore such files
-                return False
-            return True
+    def _ext(file: dict) -> bool:
+        'remove files with unsupported extensions or yanked'
+        f = file['filename'].endswith
+        y = file.get("yanked", False)
+        return not y and (f('.whl') or f('.zip') or f('.tar.gz'))
 
-        files = data["files"]
-        filter1 = (file for file in files if _ext(file))
-        filter2 = (file for file in filter1 if _parse(file))
+    def _parse(file: dict) -> bool:
+        'parse versions and platform tags for each file'
+        name = file['filename']
+        f = name.endswith
+        try:
+            if f('.whl'):
+                _, file["version"], _, file["tags"] = parse_wheel_filename(name)
+                file["is_wheel"] = True
+            elif f('.zip') or f('.tar.gz'):
+                _, file["version"] = parse_sdist_filename(
+                    # fix: selenium-2.0-dev-9429.tar.gz -> 9429
+                    to_single_dash(name)
+                )
+                file["is_wheel"] = False
+                file["tags"] = None
+        except (InvalidVersion, InvalidSdistFilename, InvalidWheelFilename):
+            # old versions
+            # expandvars-0.6.0-macosx-10.15-x86_64.tar.gz
 
-        files2 = list(filter2)
-        files2.sort(key=lambda file: file["version"], reverse=True)
-        data["files"] = files2
+            # ignore files with invalid version, PyPI no longer allows
+            # packages with special versioning schemes, and we assume we
+            # can ignore such files
+            return False
+        return True
+
+    filter1 = (file for file in files if _ext(file))
+    filter2 = (file for file in filter1 if _parse(file))
+
+    files2 = list(filter2)
+    files2.sort(key=lambda file: file["version"], reverse=True)
+    return files2
 
 
 RCACHE = RequestCache()
