@@ -17,7 +17,15 @@ import packaging.version
 
 from morgan import configurator, server
 from morgan.__about__ import __version__
-from morgan.utils import HCACHE, MCACHE, RCACHE, Cache, touch_file
+from morgan.metadata import MCACHE
+from morgan.utils import (
+    HCACHE,
+    RCACHE,
+    Cache,
+    ListExtendingOrderedDict,
+    is_requirement_relevant,
+    touch_file,
+)
 
 PYPI_ADDRESS = "https://pypi.org/simple/"
 PREFERRED_HASH_ALG = "sha256"
@@ -40,7 +48,9 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
         # into representations that are easier for the mirrorer to work with
         self.index_path = args.index_path
         self.index_url = args.index_url
-        self.config = configparser.ConfigParser()
+        self.config = configparser.ConfigParser(
+            strict=False, dict_type=ListExtendingOrderedDict
+        )
         self.config.read(config)
         self.envs = {}
         self._supported_pyversions = []
@@ -108,6 +118,12 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
         if self._processed_pkgs.check(requirement):
             return None
 
+        # Check if requirement is relevant for any environment
+        if not is_requirement_relevant(requirement, self.envs.values()):
+            print(f"\tSkipping {requirement}, not relevant for any environment")
+            self._processed_pkgs.add(requirement)  # Mark as processed
+            return None
+
         if required_by:
             print(f"[{required_by}]: {requirement}")
         else:
@@ -142,7 +158,9 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
                 if file_deps:
                     depdict.update(file_deps)
             except Exception:
-                print("\tFailed processing file {}, skipping it".format(file["filename"]))
+                print(
+                    "\tFailed processing file {}, skipping it".format(file["filename"])
+                )
                 traceback.print_exc()
                 continue
 
@@ -198,7 +216,7 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
             # packaging.specifiers.SpecifierSet(req): Invalid specifier
             # gssapi: Invalid specifier: '>=3.6.*'
             # pyzmq: Invalid specifier: '!=3.0*'
-            req = fileinfo["requires-python"] = re.sub(r'([0-9])\.?\*', r'\1', req)
+            req = fileinfo["requires-python"] = re.sub(r"([0-9])\.?\*", r"\1", req)
             try:
                 spec_set = packaging.specifiers.SpecifierSet(req)
                 # for supported_python in self._supported_pyversions:
@@ -212,7 +230,7 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
                 print(f"\tIgnoring {fileinfo['filename']}: {e}")
                 return False
 
-        if fileinfo.get("tags", None):
+        if fileinfo.get("tags"):
             for tag in fileinfo["tags"]:
                 for t in self.whl_tags:
                     t2 = zip(t[:3], [tag.interpreter, tag.abi, tag.platform])
@@ -247,7 +265,11 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
         depdict = {}
         for dep in deps:
             dep.name = packaging.utils.canonicalize_name(dep.name)
-            depdict[dep.name] = {
+            # keep the index of the dictionary for the full requirement string to pull in potentially
+            # duplicate requirements like "mylibrary<2,>=1" and "mylibrary>=2,<3" that may come from different
+            # top-level requirements
+            dep_index = str(dep)
+            depdict[dep_index] = {
                 "requirement": dep,
                 "required_by": requirement,
             }
@@ -326,7 +348,8 @@ def mirror(args: argparse.Namespace):
                 for req in reqs:
                     req = req.strip()
                     m.mirror(f"{package}{req}")
-    copy_server(args.index_path)
+    if not args.skip_server_copy:
+        copy_server(args.index_path)
 
 
 def copy_server(index_path: str):
@@ -391,6 +414,12 @@ def main():
         nargs="*",
         help="Config files (default: <INDEX_PATH>/morgan.ini)",
     )
+    parser.add_argument(
+        "--skip-server-copy",
+        dest="skip_server_copy",
+        action="store_true",
+        help="Skip server copy in mirror command (default: False)",
+    )
 
     server.add_arguments(parser)
     configurator.add_arguments(parser)
@@ -415,13 +444,13 @@ def main():
     if args.command == "generate_env":
         configurator.generate_env(args.env)
         return
-    elif args.command == "generate_reqs":
+    if args.command == "generate_reqs":
         configurator.generate_reqs(args.mode)
         return
-    elif args.command == "serve":
+    if args.command == "serve":
         server.run(args.index_path, args.host, args.port, args.no_metadata)
         return
-    elif args.command == "version":
+    if args.command == "version":
         print(f"Morgan v{__version__}")
         return
 

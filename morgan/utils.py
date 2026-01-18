@@ -2,12 +2,12 @@ import hashlib
 import json
 import os
 import re
-import tarfile
 import urllib.parse
 import urllib.request
-import zipfile
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Dict, Iterable, Optional, Set
 
 import dateutil  # type: ignore[import-untyped]
 from packaging.requirements import Requirement
@@ -19,20 +19,18 @@ from packaging.utils import (
 )
 from packaging.version import InvalidVersion
 
-from .metadata import MetadataParser, ParseException
-
 
 def to_single_dash(filename):
-    'https://packaging.python.org/en/latest/specifications/version-specifiers/#version-specifiers'
+    "https://packaging.python.org/en/latest/specifications/version-specifiers/#version-specifiers"
 
     # selenium-2.0-dev-9429.tar.gz
-    m = re.search(r'-[0-9].*-', filename)
+    m = re.search(r"-[0-9].*-", filename)
     if m:
         s2 = filename[m.start() + 1 :]
         # 2.0-dev-9429.tar.gz
-        s2 = s2.replace('-dev-', '.dev')
+        s2 = s2.replace("-dev-", ".dev")
         # 2.0.dev9429.tar.gz
-        s2 = s2.replace('-', '.')
+        s2 = s2.replace("-", ".")
         filename = filename[: m.start() + 1] + s2
     return filename
     # selenium-2.0.dev9429.tar.gz
@@ -58,14 +56,66 @@ class Cache:  # pylint: disable=protected-access
             specifier = req.specifier
             if not specifier:
                 return True
-            if all(spec.operator in ('>', '>=') for spec in specifier._specs):
+            if all(spec.operator in (">", ">=") for spec in specifier._specs):
                 return True
         return False
 
 
+def is_requirement_relevant(
+    requirement: Requirement, envs: Iterable[Dict], extras: Optional[Set[str]] = None
+) -> bool:
+    """Determines if a requirement is relevant for any of the provided environments.
+
+    Args:
+        requirement: The requirement to evaluate.
+        envs: The environments to check against.
+        extras: Optional extras to consider during evaluation.
+
+    Returns:
+        True if the requirement has no marker or if its marker evaluates to
+        True for at least one environment, False otherwise.
+    """
+    if not requirement.marker:
+        return True
+
+    # If no environments specified, assume relevant
+    if not envs:
+        return True
+
+    for env in envs:
+        # Create a copy of the environment to avoid modifying the original
+        env_copy = env.copy()
+        env_copy.setdefault("extra", "")
+        if extras:
+            env_copy["extra"] = ",".join(extras)
+
+        if requirement.marker.evaluate(env_copy):
+            return True
+
+    return False
+
+
+def filter_relevant_requirements(
+    requirements: Iterable[Requirement],
+    envs: Iterable[Dict],
+    extras: Optional[Set[str]] = None,
+) -> Set[Requirement]:
+    """Filters a collection of requirements to only those relevant for the provided environments.
+
+    Args:
+        requirements: Requirements to filter.
+        envs: The environments to check against.
+        extras: Optional extras to consider during evaluation.
+
+    Returns:
+        Set of requirements relevant for at least one environment.
+    """
+    return {req for req in requirements if is_requirement_relevant(req, envs, extras)}
+
+
 def touch_file(path: str, fileinfo: dict):
-    'upload-time: 2025-05-28T18:46:29.349478Z'
-    time_str = fileinfo.get('upload-time')
+    "upload-time: 2025-05-28T18:46:29.349478Z"
+    time_str = fileinfo.get("upload-time")
     if not path or not time_str:
         return
     dt = dateutil.parser.parse(time_str)
@@ -213,49 +263,37 @@ class HashCache:  # pylint: disable=too-few-public-methods
 HCACHE = HashCache()
 
 
-@dataclass
-class MetadataCache:  # pylint: disable=too-few-public-methods
-    # filepath: MetadataParser
-    d: dict[str, MetadataParser] = field(default_factory=dict)
+class ListExtendingOrderedDict(OrderedDict):
+    """An OrderedDict subclass that aggregates list values for duplicate keys.
 
-    # statistics
-    # filepath: count
-    # statd: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    This class extends OrderedDict to provide special handling for list values.
+    When a list value is assigned to an existing key, the new list is extended
+    onto the existing list instead of replacing it.
 
-    def extract_metadata(self, filepath: str) -> MetadataParser:
-        # # stat
-        # self.statd[filepath] += 1
-        # if self.statd[filepath] > 1:  # 2..17 in my test
-        #     print(f'\t{self.statd[filepath]}: {filepath}')
+    In the context of configparser, this allows for accumulating multiple values
+    from different sections or repeated keys, such as in multiline requirements.
 
-        if filepath in self.d:
-            return self.d[filepath]
+    Examples:
+        >>> d = MultiOrderedDict()
+        >>> d["key"] = [1, 2]
+        >>> d["key"] = [3, 4]
+        >>> d["key"]
+        [1, 2, 3, 4]
+        >>> d["other"] = "value"
+        >>> d["other"] = "new_value"  # Non-list values behave normally
+        >>> d["other"]
+        'new_value'
+    """
 
-        md = MetadataParser(filepath)
+    def __setitem__(self, key, value):
+        """Sets the value for the given key, extending lists if the key exists.
 
-        if re.search(r"\.(whl|zip)$", filepath):
-            with zipfile.ZipFile(filepath) as archive:
-                members = [member.filename for member in archive.infolist()]
-                self.handle_members(md, members, archive.open)
-        elif re.search(r"\.tar\.gz$", filepath):
-            with tarfile.open(filepath) as archive:
-                members = [member.name for member in archive.getmembers()]
-                self.handle_members(md, members, archive.extractfile)
+        Args:
+            key: The dictionary key.
+            value: The value to set. If this is a list and the key already exists,
+                the list will be extended to the existing value instead of replacing it.
+        """
+        if isinstance(value, list) and key in self:
+            self[key].extend(value)
         else:
-            raise ValueError(f"Unexpected distribution file {filepath}")
-
-        if md.seen_metadata_file():
-            md.write_metadata_file(f"{filepath}.metadata")
-
-        self.d[filepath] = md
-        return md
-
-    def handle_members(self, md: MetadataParser, members: list[str], opener):
-        for member in members:
-            try:
-                md.parse(opener, member)
-            except ParseException as e:
-                print(f"\tFailed parsing member {member}: {e}")
-
-
-MCACHE = MetadataCache()
+            super().__setitem__(key, value)
