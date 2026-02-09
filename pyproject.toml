@@ -77,3 +77,13 @@ profile = "black"
 ignore = [
     "E741",  # Ambiguous variable name: `l`
 ]
+
+[tool.pylint]
+"messages control".disable = [
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "missing-module-docstring",
+    "too-few-public-methods",
+]
+reports.score = false
+format.max-line-length = 120
