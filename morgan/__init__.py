@@ -7,7 +7,7 @@ import re
 import traceback
 import urllib.parse
 import urllib.request
-from typing import Dict, Iterable
+from typing import Iterable
 
 import packaging.requirements
 import packaging.specifiers
@@ -31,7 +31,7 @@ PYPI_ADDRESS = "https://pypi.org/simple/"
 PREFERRED_HASH_ALG = "sha256"
 
 
-class Mirrorer:  # pylint: disable=too-few-public-methods
+class Mirrorer:
     """
     Mirrorer is a class that implements the mirroring capabilities of Morgan.
     A class is used to maintain state, as the mirrorer needs to keep track of
@@ -49,7 +49,8 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
         self.index_path = args.index_path
         self.index_url = args.index_url
         self.config = configparser.ConfigParser(
-            strict=False, dict_type=ListExtendingOrderedDict
+            strict=False,
+            dict_type=ListExtendingOrderedDict,
         )
         self.config.read(config)
         self.envs = {}
@@ -70,7 +71,7 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
                 else:
                     self._supported_pyversions.append(env["python_version"])
                 # whl.tag.*
-                l = []  # list[re.Pattern]
+                l: list[re.Pattern | None] = []  # list[re.Pattern]
                 for i in ('interpreter', 'abi', 'platform'):
                     t = env.get(f'whl.tag.{i}', '').strip()
                     if t:
@@ -110,14 +111,15 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
                     next_deps.update(more_deps)
             deps = next_deps.copy()
 
-    def _mirror(
+    def _mirror(  # noqa: C901, PLR0912
         self,
         requirement: packaging.requirements.Requirement,
-        required_by: packaging.requirements.Requirement = None,
-    ) -> dict:
+        required_by: packaging.requirements.Requirement | None = None,
+    ) -> dict | None:
         if self._processed_pkgs.check(requirement):
             return None
 
+        # Display the cause of 'Skipping...'
         extras = None
         if required_by:
             extras = required_by.extras
@@ -143,13 +145,13 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
                 # PySimpleGUI has moved to a private server
                 print('\tNo files, check PYPI')
                 return None
-            else:
-                # this is a dependency, assume the dependency is not relevant
-                # for any of our environments and don't return an error
-                return None
+            # this is a dependency, assume the dependency is not relevant
+            # for any of our environments and don't return an error
+            return None
 
         if not files:
-            raise Exception(f"No files match requirement {requirement}")
+            msg = f"No files match requirement {requirement}"
+            raise Exception(msg)  # noqa: TRY002
 
         # download all files
         depdict = {}
@@ -159,9 +161,9 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
                 file_deps = self._process_file(requirement, file)
                 if file_deps:
                     depdict.update(file_deps)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 print(
-                    "\tFailed processing file {}, skipping it".format(file["filename"])
+                    "\tFailed processing file {}, skipping it".format(file["filename"]),
                 )
                 traceback.print_exc()
                 continue
@@ -174,15 +176,16 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
         self,
         requirement: packaging.requirements.Requirement,
         files: Iterable[dict],
-    ) -> Iterable[dict]:
+    ) -> list[dict] | None:
         # keep only files of the latest version that satisfies the
         # requirement (if requirement doesn't have any version specifiers,
         # take latest available version)
         if requirement.specifier is not None:
             files = list(
                 filter(
-                    lambda file: requirement.specifier.contains(file["version"]), files
-                )
+                    lambda file: requirement.specifier.contains(file["version"]),
+                    files,
+                ),
             )
 
         if not files:
@@ -204,8 +207,8 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
 
         return files
 
-    def _matches_environments(self, fileinfo: dict) -> bool:
-        req = fileinfo.get("requires-python", None)
+    def _matches_environments(self, fileinfo: dict) -> bool:  # noqa: C901, PLR0912
+        req = fileinfo.get("requires-python")
         if req:
             # The Python versions in some of our environments must be supported
             # by this file in order to match.
@@ -248,7 +251,7 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
         self,
         requirement: packaging.requirements.Requirement,
         fileinfo: dict,
-    ) -> Dict[str, packaging.requirements.Requirement]:
+    ) -> dict[str, dict[str, packaging.requirements.Requirement]] | None:
         filepath = os.path.join(self.index_path, requirement.name, fileinfo["filename"])
         hashalg = (
             PREFERRED_HASH_ALG
@@ -295,17 +298,17 @@ class Mirrorer:  # pylint: disable=too-few-public-methods
                 return True
 
         print("\t{}...".format(fileinfo["url"]), end=" ")
-        with urllib.request.urlopen(fileinfo["url"]) as inp, open(target, "wb") as out:
+        with urllib.request.urlopen(fileinfo["url"]) as inp, open(target, "wb") as out:  # noqa: S310
             out.write(inp.read())
         print("done")
 
         if not HCACHE.hash_file(target, hashalg, exphash):
             os.remove(target)
-            raise ValueError(
-                "Digest mismatch for {}. Deleting file {}.".format(
-                    fileinfo["filename"], target
-                )
+            msg = "Digest mismatch for {}. Deleting file {}.".format(
+                fileinfo["filename"],
+                target,
             )
+            raise ValueError(msg)
 
         touch_file(target, fileinfo)
         return True
@@ -373,7 +376,7 @@ def copy_server(index_path: str):
             out.write(inspect.getsource(server))
 
 
-def main():
+def main():  # noqa: C901
     """
     Executes the command line interface of Morgan. Use -h for a full list of
     flags, options and arguments.
@@ -386,10 +389,11 @@ def main():
         url = urllib.parse.urlparse(arg)
         if all((url.scheme, url.netloc)):
             return f"{url.scheme}://{url.netloc}{url.path}/"
-        raise argparse.ArgumentTypeError("Invalid URL")
+        msg = "Invalid URL"
+        raise argparse.ArgumentTypeError(msg)
 
     parser = argparse.ArgumentParser(
-        description="Morgan: PyPI Mirror for Restricted Environments"
+        description="Morgan: PyPI Mirror for Restricted Environments",
     )
 
     parser.add_argument(
@@ -453,6 +457,7 @@ def main():
         server.run(args.index_path, args.host, args.port, args.no_metadata)
         return
     if args.command == "version":
+        # ruff: noqa: T201
         print(f"Morgan v{__version__}")
         return
 
