@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import configparser
 import inspect
@@ -48,6 +50,7 @@ class Mirrorer:
         # into representations that are easier for the mirrorer to work with
         self.index_path = args.index_path
         self.index_url = args.index_url
+        self.prerelease = args.prerelease
         self.config = configparser.ConfigParser(
             strict=False,
             dict_type=ListExtendingOrderedDict,
@@ -133,7 +136,11 @@ class Mirrorer:
             self._processed_pkgs.add(requirement)  # Mark as processed
             return None
 
-        data: dict = RCACHE.get(self.index_url, requirement.name)
+        data: dict = RCACHE.get(
+            self.index_url,
+            requirement.name,
+            prerelease=self.prerelease,
+        )
         response_url = data['response_url']
 
         files = data["files"]
@@ -203,9 +210,7 @@ class Mirrorer:
         # Only keep files from the latest version that satisifies all
         # specifiers and environments
         latest_version = files[0]["version"]
-        files = list(filter(lambda file: file["version"] == latest_version, files))
-
-        return files
+        return list(filter(lambda file: file["version"] == latest_version, files))
 
     def _matches_environments(self, fileinfo: dict) -> bool:  # noqa: C901, PLR0912
         req = fileinfo.get("requires-python")
@@ -292,13 +297,15 @@ class Mirrorer:
 
         # if target already exists, verify its hash and only download if
         # there's a mismatch
-        if os.path.exists(target):
-            if HCACHE.hash_file(target, hashalg, exphash):
-                touch_file(target, fileinfo)
-                return True
+        if os.path.exists(target) and HCACHE.hash_file(target, hashalg, exphash):
+            touch_file(target, fileinfo)
+            return True
 
         print("\t{}...".format(fileinfo["url"]), end=" ")
-        with urllib.request.urlopen(fileinfo["url"]) as inp, open(target, "wb") as out:  # noqa: S310
+        with urllib.request.urlopen(fileinfo["url"]) as inp, open(
+            target,
+            "wb",
+        ) as out:  # noqa: S310
             out.write(inp.read())
         print("done")
 
@@ -426,6 +433,11 @@ def main():  # noqa: C901
         action="store_true",
         help="Skip server copy in mirror command (default: False)",
     )
+    parser.add_argument(
+        '--prerelease',
+        action='store_true',
+        help='download prerelease too (dev, a, b, rc)',
+    )
 
     server.add_arguments(parser)
     configurator.add_arguments(parser)
@@ -469,7 +481,8 @@ def main():  # noqa: C901
         if not os.path.isfile(c):
             # If a file named in filenames cannot be opened, that file will be ignored
             # https://docs.python.org/3.12/library/configparser.html#configparser.ConfigParser.read
-            raise argparse.ArgumentTypeError(f"Invalid config: {c}")
+            msg = f"Invalid config: {c}"
+            raise argparse.ArgumentTypeError(msg)
 
     if args.command == "mirror":
         mirror(args)
