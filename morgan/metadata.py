@@ -330,7 +330,7 @@ class MetadataParser:
 
 
 @dataclass
-class MetadataCache:  # pylint: disable=too-few-public-methods
+class MetadataCache:
     # filepath: MetadataParser
     d: dict[str, MetadataParser] = field(default_factory=dict)
 
