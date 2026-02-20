@@ -20,13 +20,13 @@ requires-python = ">=3.8"
 dependencies = [
     #"packaging~=21.3",
         # hatchling 1.27.0 requires packaging>=24.2, but you have packaging 21.3 which is incompatible.
-    "packaging~=24.2",
+    #"packaging~=24.2",
         # packaging.utils.InvalidSdistFilename: Invalid sdist filename (invalid version): 'expandvars-0.6.0-macosx-10.15-x86_64.tar.gz' (old versions)
         # solved in morgan/__init__.py
-    #"packaging<26",  # no prereleases
+    "packaging>=24.2",  # v26.x, prereleases, solved with --prerelease
     #"importlib-metadata~=4.12.0; python_version < '3.8'",
     #"tomli~=2.0.1",
-    "tomli<3",
+    "tomli>=2.0.1",
     "python-dateutil",
 ]
 classifiers = [
@@ -84,10 +84,15 @@ ignore = [
     "ANN",  # don't enforce annotations
     "D10",  # don't enforce docstrings
     "D2",   # don't enforce pydoc style
+    "D300",  # Use triple double quotes `"""`
     "D4",   # don't enforce pydoc style
     "E501", # ignore line-too-long as we ruff format is enforced anyway
     "E741",  # Ambiguous variable name: `l`
+    "ERA001",  # Found commented-out code
     "PTH",  # ignore pathlib suggestions
+    "Q000",  # Single quotes found but double quotes preferred
+    "Q002",  # Single quote docstring found but double quotes preferred
+    "TC002",  # Move third-party import `packaging.requirements.Requirement` into a type-checking block
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -119,6 +124,7 @@ profile = "black"
     "missing-function-docstring",
     "missing-module-docstring",
     "too-few-public-methods",
+    "too-many-instance-attributes",
 ]
 reports.score = false
 format.max-line-length = 120
