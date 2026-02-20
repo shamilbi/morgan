@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -7,7 +9,7 @@ import urllib.request
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Iterable, Optional, Set
+from typing import Iterable
 
 import dateutil  # type: ignore[import-untyped]
 from packaging.requirements import Requirement
@@ -62,7 +64,9 @@ class Cache:  # pylint: disable=protected-access
 
 
 def is_requirement_relevant(
-    requirement: Requirement, envs: Iterable[Dict], extras: Optional[Set[str]] = None
+    requirement: Requirement,
+    envs: Iterable[dict],
+    extras: set[str] | None = None,
 ) -> bool:
     """Determines if a requirement is relevant for any of the provided environments.
 
@@ -97,9 +101,9 @@ def is_requirement_relevant(
 
 def filter_relevant_requirements(
     requirements: Iterable[Requirement],
-    envs: Iterable[Dict],
-    extras: Optional[Set[str]] = None,
-) -> Set[Requirement]:
+    envs: Iterable[dict],
+    extras: set[str] | None = None,
+) -> set[Requirement]:
     """Filters a collection of requirements to only those relevant for the provided environments.
 
     Args:
@@ -128,14 +132,14 @@ def touch_file_dt(path: str, dt: datetime):
 
 
 @dataclass
-class RequestCache:  # pylint: disable=too-few-public-methods
+class RequestCache:
     d: dict[str, dict] = field(default_factory=dict)  # name: data
 
     # # statistics
     # # name: count
     # statd: dict[str, int] = field(default_factory=lambda: defaultdict(int))
 
-    def get(self, url: str, name: str) -> dict:
+    def get(self, url: str, name: str, *, prerelease: bool = False) -> dict:
         # # stat
         # self.statd[name] += 1
         # if self.statd[name] > 1:  # 2..18 in my test
@@ -166,18 +170,20 @@ class RequestCache:  # pylint: disable=too-few-public-methods
             v_str = "1.0"
         v_int = [int(i) for i in v_str.split(".")[:2]]
         if v_int[0] != 1:
-            raise ValueError(f"Unsupported metadata version {v_str}, only support 1.x")
+            msg = f"Unsupported metadata version {v_str}, only support 1.x"
+            raise ValueError(msg)
 
         files = data["files"]
         if files is None or not isinstance(files, list):
-            raise ValueError("Expected response to contain a list of 'files'")
+            msg = "Expected response to contain a list of 'files'"
+            raise ValueError(msg)
 
-        data["files"] = enrich_files(files)
+        data["files"] = enrich_files(files, prerelease=prerelease)
         self.d[name] = data
         return data
 
 
-def enrich_files(files: list[dict]) -> list[dict]:
+def enrich_files(files: list[dict], *, prerelease: bool = False) -> list[dict]:
     '''
     1) remove files with unsupported extensions or yanked
     2) parse versions and platform tags for each file
@@ -201,10 +207,12 @@ def enrich_files(files: list[dict]) -> list[dict]:
             elif f('.zip') or f('.tar.gz'):
                 _, file["version"] = parse_sdist_filename(
                     # fix: selenium-2.0-dev-9429.tar.gz -> 9429
-                    to_single_dash(name)
+                    to_single_dash(name),
                 )
                 file["is_wheel"] = False
                 file["tags"] = None
+            if file["version"].is_prerelease and not prerelease:
+                return False
         except (InvalidVersion, InvalidSdistFilename, InvalidWheelFilename):
             # old versions
             # expandvars-0.6.0-macosx-10.15-x86_64.tar.gz
@@ -234,7 +242,7 @@ def hash_file(path: str, alg: str) -> str:
 
 
 @dataclass
-class HashCache:  # pylint: disable=too-few-public-methods
+class HashCache:
     paths: set[str] = field(default_factory=set)  # {filepath}
 
     def hash_file(self, filepath: str, hashalg: str, exphash: str) -> bool:
