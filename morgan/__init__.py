@@ -114,7 +114,7 @@ class Mirrorer:
                     next_deps.update(more_deps)
             deps = next_deps.copy()
 
-    def _mirror(  # noqa: C901, PLR0912
+    def _mirror(
         self,
         requirement: packaging.requirements.Requirement,
         required_by: packaging.requirements.Requirement | None = None,
@@ -212,7 +212,7 @@ class Mirrorer:
         latest_version = files[0]["version"]
         return list(filter(lambda file: file["version"] == latest_version, files))
 
-    def _matches_environments(self, fileinfo: dict) -> bool:  # noqa: C901, PLR0912
+    def _matches_environments(self, fileinfo: dict) -> bool:
         req = fileinfo.get("requires-python")
         if req:
             # The Python versions in some of our environments must be supported
@@ -302,10 +302,11 @@ class Mirrorer:
             return True
 
         print("\t{}...".format(fileinfo["url"]), end=" ")
+        # ruff: noqa: S310
         with urllib.request.urlopen(fileinfo["url"]) as inp, open(
             target,
             "wb",
-        ) as out:  # noqa: S310
+        ) as out:
             out.write(inp.read())
         print("done")
 
@@ -357,8 +358,8 @@ def mirror(args: argparse.Namespace):
                 #   <1.27
                 #   >=2
                 #   [brotli]
-                for req in reqs:
-                    req = req.strip()
+                for req_ in reqs:
+                    req = req_.strip()
                     m.mirror(f"{package}{req}")
     if not args.skip_server_copy:
         copy_server(args.index_path)
@@ -383,12 +384,7 @@ def copy_server(index_path: str):
             out.write(inspect.getsource(server))
 
 
-def main():  # noqa: C901
-    """
-    Executes the command line interface of Morgan. Use -h for a full list of
-    flags, options and arguments.
-    """
-
+def create_arg_parser() -> argparse.ArgumentParser:
     def my_url(arg):
         # url -> url/ without params
         # https://stackoverflow.com/a/73719022
@@ -434,11 +430,20 @@ def main():  # noqa: C901
         help="Skip server copy in mirror command (default: False)",
     )
     parser.add_argument(
-        '--prerelease',
-        action='store_true',
-        help='download prerelease too (dev, a, b, rc)',
+        "--prerelease",
+        action="store_true",
+        help="download prerelease too (dev, a, b, rc)",
     )
 
+    return parser
+
+
+def main():
+    """
+    Executes the command line interface of Morgan. Use -h for a full list of
+    flags, options and arguments.
+    """
+    parser = create_arg_parser()
     server.add_arguments(parser)
     configurator.add_arguments(parser)
 
