@@ -58,6 +58,7 @@ class Cache:  # pylint: disable=protected-access
             specifier = req.specifier
             if not specifier:
                 return True
+            # ruff: noqa: SLF001
             if all(spec.operator in (">", ">=") for spec in specifier._specs):
                 return True
         return False
@@ -153,6 +154,7 @@ class RequestCache:
 
         # get information about this package from the Simple API in JSON
         # format as per PEP 691
+        # ruff: noqa: S310
         request = urllib.request.Request(
             f"{url}{name}/",
             headers={
@@ -259,6 +261,7 @@ class HashCache:
             with open(hfile, "rb") as fp:
                 if bytes_ == fp.read():  # most cases
                     self.paths.add(filepath)
+                    # ruff: noqa: DTZ005
                     touch_file_dt(hfile, datetime.now())
                     return True
 
