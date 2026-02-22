@@ -61,8 +61,10 @@ def generate_reqs(mode: str = ">="):
             ">=" for minimum versioning, or "<=" for maximum versioning.
             Defaults to ">=".
     """
-    requirements = {dist.metadata["Name"].lower(): f"{mode}{dist.version}"
-                    for dist in metadata.distributions()}
+    requirements = {
+        dist.metadata["Name"].lower(): f"{mode}{dist.version}"
+        for dist in metadata.distributions()
+    }
     config = configparser.ConfigParser()
     config["requirements"] = OrderedDict(sorted(requirements.items()))
     config.write(sys.stdout)
@@ -74,13 +76,12 @@ def add_arguments(parser: argparse.ArgumentParser):
     """
 
     parser.add_argument(
-        '-e', '--env',
-        dest='env',
-        help='Name of environment to configure'
+        '-e', '--env', dest='env', help='Name of environment to configure',
     )
 
     parser.add_argument(
-        '-m', '--mode',
+        '-m',
+        '--mode',
         dest='mode',
         choices=['>=', '==', '<='],
         default=">=",
