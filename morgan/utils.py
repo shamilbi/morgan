@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -159,11 +160,12 @@ class RequestCache:
             f"{url}{name}/",
             headers={
                 "Accept": "application/vnd.pypi.simple.v1+json",
+                "Accept-Encoding": "gzip",
             },
         )
 
         with urllib.request.urlopen(request) as response:
-            data = json.load(response)
+            data = json.loads(gzip.decompress(response.read()))
             data['response_url'] = str(response.url)
 
         # check metadata version ~1.0
