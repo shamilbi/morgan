@@ -24,7 +24,7 @@ from packaging.version import InvalidVersion
 
 
 def to_single_dash(filename):
-    "https://packaging.python.org/en/latest/specifications/version-specifiers/#version-specifiers"
+    """https://packaging.python.org/en/latest/specifications/version-specifiers/#version-specifiers"""
 
     # selenium-2.0-dev-9429.tar.gz
     m = re.search(r"-[0-9].*-", filename)
@@ -39,7 +39,7 @@ def to_single_dash(filename):
     # selenium-2.0.dev9429.tar.gz
 
 
-class Cache:  # pylint: disable=protected-access
+class Cache:
     def __init__(self):
         self.cache: set[str] = set()
 
@@ -54,12 +54,13 @@ class Cache:  # pylint: disable=protected-access
         else:
             self.cache.add(str(req))
 
-    def is_simple_case(self, req):
+    def is_simple_case(self, req: Requirement) -> bool:
         if not req.marker and not req.extras:
             specifier = req.specifier
             if not specifier:
                 return True
             # ruff: noqa: SLF001
+            # pylint: disable=protected-access
             if all(spec.operator in (">", ">=") for spec in specifier._specs):
                 return True
         return False
@@ -120,7 +121,7 @@ def filter_relevant_requirements(
 
 
 def touch_file(path: str, fileinfo: dict):
-    "upload-time: 2025-05-28T18:46:29.349478Z"
+    """upload-time: 2025-05-28T18:46:29.349478Z"""
     time_str = fileinfo.get("upload-time")
     if not path or not time_str:
         return
@@ -150,23 +151,8 @@ class RequestCache:
         if name in self.d:
             return self.d[name]
 
-        if not url.endswith('/'):
-            url += '/'
-
-        # get information about this package from the Simple API in JSON
-        # format as per PEP 691
-        # ruff: noqa: S310
-        request = urllib.request.Request(
-            f"{url}{name}/",
-            headers={
-                "Accept": "application/vnd.pypi.simple.v1+json",
-                "Accept-Encoding": "gzip",
-            },
-        )
-
-        with urllib.request.urlopen(request) as response:
-            data = json.loads(gzip.decompress(response.read()))
-            data['response_url'] = str(response.url)
+        data, response_url = download_req(url, name)
+        data['response_url'] = response_url
 
         # check metadata version ~1.0
         v_str = data["meta"]["api-version"]  # 1.4
@@ -310,3 +296,31 @@ class ListExtendingOrderedDict(OrderedDict):
             self[key].extend(value)
         else:
             super().__setitem__(key, value)
+
+
+def download_req(index_url: str, req_name: str) -> tuple[dict, str]:
+    # get information about this package from the Simple API in JSON
+    # format as per PEP 691
+    url = index_url.rstrip("/")
+    request = urllib.request.Request(
+        f"{url}/{req_name}/",
+        headers={
+            "Accept": "application/vnd.pypi.simple.v1+json",
+            "Accept-Encoding": "gzip",
+        },
+    )
+
+    response_url = ""
+    # ruff: noqa: S310
+    with urllib.request.urlopen(request) as response:
+        bytes1 = response.read()
+        try:
+            bytes2 = gzip.decompress(bytes1)
+            data = json.loads(bytes2)
+        except gzip.BadGzipFile:
+            data = json.loads(bytes1)
+        response_url = str(response.url)
+        if data:
+            return data, response_url
+        msg = f"Failed loading metadata: {response}"
+        raise RuntimeError(msg)
