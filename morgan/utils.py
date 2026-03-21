@@ -22,6 +22,8 @@ from packaging.utils import (
 )
 from packaging.version import InvalidVersion
 
+USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:148.0) Gecko/20100101 Firefox/148.0"
+
 
 def to_single_dash(filename):
     """https://packaging.python.org/en/latest/specifications/version-specifiers/#version-specifiers"""
@@ -305,6 +307,7 @@ def download_req(index_url: str, req_name: str) -> tuple[dict, str]:
     request = urllib.request.Request(
         f"{url}/{req_name}/",
         headers={
+            "User-Agent": USER_AGENT,
             "Accept": "application/vnd.pypi.simple.v1+json",
             "Accept-Encoding": "gzip",
         },
