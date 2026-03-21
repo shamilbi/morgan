@@ -23,6 +23,7 @@ from morgan.metadata import MCACHE
 from morgan.utils import (
     HCACHE,
     RCACHE,
+    USER_AGENT,
     Cache,
     ListExtendingOrderedDict,
     is_requirement_relevant,
@@ -303,7 +304,13 @@ class Mirrorer:
 
         print("\t{}...".format(fileinfo["url"]), end=" ")
         # ruff: noqa: S310
-        with urllib.request.urlopen(fileinfo["url"]) as inp, open(
+        request = urllib.request.Request(
+            fileinfo["url"],
+            headers={
+                "User-Agent": USER_AGENT,
+            },
+        )
+        with urllib.request.urlopen(request) as inp, open(
             target,
             "wb",
         ) as out:
