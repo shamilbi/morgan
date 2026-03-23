@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-import gzip
 import hashlib
-import json
 import os
 import re
-import urllib.parse
-import urllib.request
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Iterable
 
 import dateutil  # type: ignore[import-untyped]
+import requests
 from packaging.requirements import Requirement
 from packaging.utils import (
     InvalidSdistFilename,
@@ -23,6 +20,7 @@ from packaging.utils import (
 from packaging.version import InvalidVersion
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:148.0) Gecko/20100101 Firefox/148.0"
+SESSION = requests.Session()
 
 
 def to_single_dash(filename):
@@ -304,26 +302,19 @@ def download_req(index_url: str, req_name: str) -> tuple[dict, str]:
     # get information about this package from the Simple API in JSON
     # format as per PEP 691
     url = index_url.rstrip("/")
-    request = urllib.request.Request(
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/vnd.pypi.simple.v1+json",
+        "Accept-Encoding": "gzip",
+    }
+    response = SESSION.get(
         f"{url}/{req_name}/",
-        headers={
-            "User-Agent": USER_AGENT,
-            "Accept": "application/vnd.pypi.simple.v1+json",
-            "Accept-Encoding": "gzip",
-        },
+        headers=headers,
     )
-
-    response_url = ""
-    # ruff: noqa: S310
-    with urllib.request.urlopen(request) as response:
-        # Check if response is gzip-encoded
-        if response.headers.get("Content-Encoding") == "gzip":
-            with gzip.GzipFile(fileobj=response) as gzip_response:
-                data = json.load(gzip_response)
-        else:
-            data = json.load(response)
-        response_url = str(response.url)
-        if data:
-            return data, response_url
-        msg = f"Failed loading metadata: {response}"
-        raise RuntimeError(msg)
+    response.raise_for_status()
+    data = response.json()  # already ungzipped!
+    response_url = response.url
+    if data:
+        return data, response_url
+    msg = f"Failed loading metadata: {response}"
+    raise RuntimeError(msg)
