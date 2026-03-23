@@ -8,7 +8,6 @@ import os.path
 import re
 import traceback
 import urllib.parse
-import urllib.request
 from typing import Iterable
 
 import packaging.requirements
@@ -23,6 +22,7 @@ from morgan.metadata import MCACHE
 from morgan.utils import (
     HCACHE,
     RCACHE,
+    SESSION,
     USER_AGENT,
     Cache,
     ListExtendingOrderedDict,
@@ -303,18 +303,17 @@ class Mirrorer:
             return True
 
         print("\t{}...".format(fileinfo["url"]), end=" ")
-        # ruff: noqa: S310
-        request = urllib.request.Request(
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept-Encoding": "gzip",
+        }
+        response = SESSION.get(
             fileinfo["url"],
-            headers={
-                "User-Agent": USER_AGENT,
-            },
+            headers=headers,
         )
-        with urllib.request.urlopen(request) as inp, open(
-            target,
-            "wb",
-        ) as out:
-            out.write(inp.read())
+        response.raise_for_status()
+        with open(target, "wb") as out:
+            out.write(response.content)
         print("done")
 
         if not HCACHE.hash_file(target, hashalg, exphash):
