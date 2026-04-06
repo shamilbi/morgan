@@ -1,3 +1,12 @@
+# ruff: noqa: FBT001, FBT002, PERF401, PLR2004, PLW0602, PLW0603, S104
+# FBT: allow boolean as positional argument
+# PERF401: allow manual list comprehensions
+# PLR2004: allow magic values in comparisons
+# PLW0602: allow unassigned globals
+# PLW0603: allow usage of globals
+# S104: allow binding to all network interfaces even if it is insecure
+from __future__ import annotations
+
 import argparse
 import html
 import http.server
@@ -6,11 +15,12 @@ import os
 import pathlib
 import re
 import urllib.parse
+from typing import Any
 
-PYPI_JSON_TYPE_V1 = 'application/vnd.pypi.simple.v1+json'
-PYPI_JSON_TYPE_LT = 'application/vnd.pypi.simple.latest+json'
-PYPI_HTML_TYPE_V1 = 'application/vnd.pypi.simple.v1+html'
-GENL_HTML_TYPE = 'text/html'
+PYPI_JSON_TYPE_V1 = "application/vnd.pypi.simple.v1+json"
+PYPI_JSON_TYPE_LT = "application/vnd.pypi.simple.latest+json"
+PYPI_HTML_TYPE_V1 = "application/vnd.pypi.simple.v1+html"
+GENL_HTML_TYPE = "text/html"
 
 project_re = re.compile(r"/([^/]+)/")
 file_re = re.compile(r"/([^/]+)/([^/]+)")
@@ -36,8 +46,9 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
             self.wfile.write(
-                b"The server cannot generate a response " +
-                b"in any of the requested MIME types")
+                b"The server cannot generate a response "
+                b"in any of the requested MIME types",
+            )
             return
 
         if url[2] in ["", "/"]:
@@ -56,7 +67,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
 
         self._serve_notfound()
 
-    def _serve_notfound(self, msg: str = None):
+    def _serve_notfound(self, msg: str | None = None):
         self.send_response(404)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
@@ -77,23 +88,21 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", PYPI_JSON_TYPE_V1)
             self.end_headers()
-            body = json.dumps({
-                "meta": {"api-version": "1.0"},
-                "projects": projects
-            })
+            body = json.dumps({"meta": {"api-version": "1.0"}, "projects": projects})
             self.wfile.write(body.encode("utf-8"))
         else:
             self.send_response(200)
             self.send_header("Content-Type", ct)
             self.end_headers()
-            self.wfile.write(
-                b"<!DOCTYPE html>\n<html>\n  <body>\n")
-            for (i, project) in enumerate(projects):
+            self.wfile.write(b"<!DOCTYPE html>\n<html>\n  <body>\n")
+            for i, project in enumerate(projects):
                 newline = "\n" if i < len(projects) - 1 else ""
                 self.wfile.write(
-                    "    <a href=\"/{}/\">{}</a>{}".format(
+                    '    <a href="/{}/">{}</a>{}'.format(
                         html.escape(project["name"]),
-                        project["name"], newline).encode("utf-8"),
+                        project["name"],
+                        newline,
+                    ).encode("utf-8"),
                 )
             self.wfile.write(b"\n  </body>\n</html>")
 
@@ -103,31 +112,32 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
 
         path = pathlib.Path(index_path, project)
         if not path.exists() or not path.is_dir():
-            self._serve_notfound("No such project {}".format(project))
+            self._serve_notfound(f"No such project {project}")
             return
 
         files = []
         with os.scandir(path) as it:
             for entry in it:
                 if re.search(r"\.(whl|zip|tar\.gz)$", entry.name):
-                    file = {
+                    file: dict[str, Any] = {
                         "filename": entry.name,
-                        "url": "/{}/{}".format(project, entry.name),
+                        "url": f"/{project}/{entry.name}",
                         "hashes": {},
                     }
 
                     # read file hash
-                    hashfile = path.joinpath("{}.hash".format(entry.name))
+                    hashfile = path.joinpath(f"{entry.name}.hash")
                     if hashfile.exists():
-                        with open(hashfile, "r") as hf:
+                        with open(hashfile) as hf:
                             data = hf.read().strip().split("=")
                             file["hashes"][data[0]] = data[1]
 
                     # do we have a metadata file?
-                    file["dist-info-metadata"] = False if no_metadata \
-                        else path.joinpath(
-                            "{}.metadata".format(entry.name)
-                        ).exists()
+                    file["dist-info-metadata"] = (
+                        False
+                        if no_metadata
+                        else path.joinpath(f"{entry.name}.metadata").exists()
+                    )
 
                     files.append(file)
         files.sort(key=lambda file: file["filename"])
@@ -136,40 +146,36 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", PYPI_JSON_TYPE_V1)
             self.end_headers()
-            body = json.dumps({
-                "name": project,
-                "meta": {"api-version": "1.0"},
-                "files": files
-            })
+            body = json.dumps(
+                {"name": project, "meta": {"api-version": "1.0"}, "files": files},
+            )
             self.wfile.write(body.encode("utf-8"))
         else:
             self.send_response(200)
             self.send_header("Content-Type", ct)
             self.end_headers()
-            self.wfile.write(
-                b"<!DOCTYPE html>\n<html>\n  <body>\n")
-            for (i, file) in enumerate(files):
+            self.wfile.write(b"<!DOCTYPE html>\n<html>\n  <body>\n")
+            for i, file in enumerate(files):
                 newline = "\n" if i < len(files) - 1 else ""
                 hashval = ""
                 if "sha256" in file["hashes"]:
-                    hashval = "#{}={}".format(
-                        "sha256", file["hashes"]["sha256"])
+                    hashval = "#{}={}".format("sha256", file["hashes"]["sha256"])
                 if not no_metadata and file.get("dist-info-metadata", False):
                     self.wfile.write(
-                        "    <a href=\"{}{}\" data-dist-info-metadata=\"true\">{}</a>{}".format(
-                                file["url"],
-                                hashval,
-                                file["filename"],
-                                newline,
+                        '    <a href="{}{}" data-dist-info-metadata="true">{}</a>{}'.format(
+                            file["url"],
+                            hashval,
+                            file["filename"],
+                            newline,
                         ).encode("utf-8"),
                     )
                 else:
                     self.wfile.write(
-                        "    <a href=\"{}{}\">{}</a>{}".format(
-                                file["url"],
-                                hashval,
-                                file["filename"],
-                                newline,
+                        '    <a href="{}{}">{}</a>{}'.format(
+                            file["url"],
+                            hashval,
+                            file["filename"],
+                            newline,
                         ).encode("utf-8"),
                     )
             self.wfile.write(b"\n  </body>\n</html>")
@@ -180,11 +186,11 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
 
         path = pathlib.Path(index_path, project, filename)
         if not path.exists() or not path.is_file():
-            self._serve_notfound("No such project {}".format(project))
+            self._serve_notfound(f"No such project {project}")
             return
 
         if no_metadata and re.search(r"\.metadata$", filename):
-            self._serve_notfound("No such file {}".format(filename))
+            self._serve_notfound(f"No such file {filename}")
             return
 
         ct = "text/plain"
@@ -222,7 +228,7 @@ def run(
     ).serve_forever()
 
 
-def parse_accept_header(header_val: str) -> str:
+def parse_accept_header(header_val: str | None) -> str | None:
     """
     Parses an Accept HTTP header and returns a selected MIME type for the server
     to answer with, honoring priorities defined in the header value. If the
@@ -246,7 +252,7 @@ def parse_accept_header(header_val: str) -> str:
             PYPI_JSON_TYPE_V1,
             PYPI_JSON_TYPE_LT,
             PYPI_HTML_TYPE_V1,
-            GENL_HTML_TYPE
+            GENL_HTML_TYPE,
         ]:
             return option["mime"]
 
@@ -272,7 +278,7 @@ def parse_accept_option(option: str) -> dict:
 
     return {
         "mime": m.group(1).strip(),
-        "priority": float(m.group(2)) if m.lastindex == 2 else 0
+        "priority": float(m.group(2)) if m.lastindex == 2 else 0,
     }
 
 
@@ -290,34 +296,37 @@ def add_arguments(parser: argparse.ArgumentParser):
     """
 
     parser.add_argument(
-        '-H', '--host',
-        dest='host',
-        default='0.0.0.0',
-        help='Host to listen on',
+        "-H",
+        "--host",
+        dest="host",
+        default="0.0.0.0",
+        help="Host to listen on",
     )
     parser.add_argument(
-        '-p', '--port',
-        dest='port',
+        "-p",
+        "--port",
+        dest="port",
         default=8080,
         type=int,
-        help='Port to listen on',
+        help="Port to listen on",
     )
     parser.add_argument(
-        '--no-metadata',
-        action='store_true',
-        dest='no_metadata',
+        "--no-metadata",
+        action="store_true",
+        dest="no_metadata",
         default=False,
-        help='Do not serve metadata files',
+        help="Do not serve metadata files",
     )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Morgan PyPI Server")
     parser.add_argument(
-        '-i', '--index-path',
-        dest='index_path',
+        "-i",
+        "--index-path",
+        dest="index_path",
         default=os.getcwd(),
-        help='Path to the package index',
+        help="Path to the package index",
     )
     add_arguments(parser)
     args = parser.parse_args()
