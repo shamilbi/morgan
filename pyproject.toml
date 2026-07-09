@@ -72,6 +72,8 @@ docstring-code-format = true
 # docstrings.
 docstring-code-line-length = "dynamic"
 
+quote-style = "preserve"
+
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
