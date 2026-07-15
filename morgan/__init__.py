@@ -55,6 +55,7 @@ class Mirrorer:
         self.config = configparser.ConfigParser(
             strict=False,
             dict_type=ListExtendingOrderedDict,
+            inline_comment_prefixes=('#',),
         )
         self.config.read(config)
         self.envs = {}
