@@ -84,6 +84,39 @@ class MetadataParser:
         self.core_dependencies: set[Requirement] = set()
         self.optional_dependencies: dict[str, set[Requirement]] = {}
         self.build_dependencies: set[Requirement] = set()
+        self._metadata_file: bytes | None = None
+
+        self.whl = self.zip = self.tar_gz = False
+        if source_path.endswith(".whl"):
+            self.whl = True
+        elif source_path.endswith(".tar.gz"):
+            self.tar_gz = True
+        elif source_path.endswith(".zip"):
+            self.zip = True
+
+        if self.whl or self.zip:
+            with zipfile.ZipFile(source_path) as archive:
+                members = [member.filename for member in archive.infolist()]
+                self.parse_members(members, archive.open)
+        elif self.tar_gz:
+            with tarfile.open(source_path) as archive:
+                members = [member.name for member in archive.getmembers()]
+                self.parse_members(members, archive.extractfile)
+        else:
+            msg = f"Unexpected distribution file {source_path}"
+            raise ValueError(msg)
+
+        if self._metadata_file is not None:
+            self.write_metadata_file(f"{source_path}.metadata")
+
+    def parse_members(self, members: list[str], opener):
+        # ruff: noqa: PERF203
+        for member in members:
+            try:
+                self.parse(opener, member)
+            except ParseError as e:
+                # ruff: noqa: T201
+                print(f"\tFailed parsing member {member}: {e}")
 
     # ruff: noqa: C901
     def parse(
@@ -111,15 +144,15 @@ class MetadataParser:
         parse_func: Callable[[IO[bytes]], Any] | None = None
         main_metadata_file = False
 
-        if re.search(r"\.whl$", self.source_path):
+        if self.whl:
             if re.fullmatch(r"[^/]+\.dist-info/METADATA", filename):
                 parse_func = self._parse_metadata_file
                 main_metadata_file = True
-        elif re.search(r"\.zip$", self.source_path):
+        elif self.zip:
             if re.fullmatch(r"([^/]+/)?PKG-INFO", filename):
                 parse_func = self._parse_metadata_file
                 main_metadata_file = True
-        elif re.search(r"\.tar\.gz$", self.source_path):
+        elif self.tar_gz:
             if re.fullmatch(r"[^/]+/PKG-INFO", filename):
                 parse_func = self._parse_metadata_file
                 main_metadata_file = True
@@ -142,17 +175,9 @@ class MetadataParser:
 
         with file_object as fp:
             if main_metadata_file:
-                # pylint: disable=attribute-defined-outside-init
                 self._metadata_file = fp.read()
                 fp.seek(0)
             parse_func(fp)
-
-    def seen_metadata_file(self) -> bool:
-        """
-        Returns a boolean value if the archive's main METADATA file has already
-        been read.
-        """
-        return hasattr(self, "_metadata_file")
 
     def write_metadata_file(self, target: str):
         """
@@ -161,7 +186,7 @@ class MetadataParser:
         clobbered, if already existing. If the main metadata file has not been
         read yet, an exception will be raised.
         """
-        if not hasattr(self, "_metadata_file"):
+        if self._metadata_file is None:
             msg = "Main METADATA file has not been read yet"
             raise ParseError(msg)
 
@@ -372,32 +397,8 @@ class MetadataCache:
 
         md = MetadataParser(filepath)
 
-        if re.search(r"\.(whl|zip)$", filepath):
-            with zipfile.ZipFile(filepath) as archive:
-                members = [member.filename for member in archive.infolist()]
-                self.handle_members(md, members, archive.open)
-        elif re.search(r"\.tar\.gz$", filepath):
-            with tarfile.open(filepath) as archive:
-                members = [member.name for member in archive.getmembers()]
-                self.handle_members(md, members, archive.extractfile)
-        else:
-            msg = f"Unexpected distribution file {filepath}"
-            raise ValueError(msg)
-
-        if md.seen_metadata_file():
-            md.write_metadata_file(f"{filepath}.metadata")
-
         self.d[filepath] = md
         return md
-
-    def handle_members(self, md: MetadataParser, members: list[str], opener):
-        # ruff: noqa: PERF203
-        for member in members:
-            try:
-                md.parse(opener, member)
-            except ParseError as e:
-                # ruff: noqa: T201
-                print(f"\tFailed parsing member {member}: {e}")
 
 
 MCACHE = MetadataCache()
