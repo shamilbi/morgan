@@ -305,9 +305,10 @@ class Mirrorer:
 
         print("\t{}...".format(fileinfo["url"]), end=" ")
         headers = {
-            "User-Agent": USER_AGENT,
             "Accept-Encoding": "gzip",
         }
+        if USER_AGENT:
+            headers["User-Agent"] = USER_AGENT
         response = SESSION.get(
             fileinfo["url"],
             headers=headers,
