@@ -303,10 +303,11 @@ def download_req(index_url: str, req_name: str) -> tuple[dict, str]:
     # format as per PEP 691
     url = index_url.rstrip("/")
     headers = {
-        "User-Agent": USER_AGENT,
         "Accept": "application/vnd.pypi.simple.v1+json",
         "Accept-Encoding": "gzip",
     }
+    if USER_AGENT:
+        headers["User-Agent"] = USER_AGENT
     response = SESSION.get(
         f"{url}/{req_name}/",
         headers=headers,
