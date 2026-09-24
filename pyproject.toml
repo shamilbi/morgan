@@ -52,7 +52,7 @@ lint = [
 ]
 
 [tool.hatch.version]
-path = "morgan/__about__.py"
+path = "morgan/__init__.py"
 
 [project.urls]
 "Homepage" = "https://github.com/ido50/morgan"
@@ -61,7 +61,7 @@ path = "morgan/__about__.py"
 "Changelog" = "https://github.com/ido50/morgan/releases"
 
 [project.scripts]
-morgan = "morgan:main"
+morgan = "morgan.__main__:main"
 
 [tool.ruff.format]
 # Enable auto-formatting of code examples in docstrings. Markdown,
@@ -88,7 +88,6 @@ ignore = [
     "PTH",  # ignore pathlib suggestions
     "Q000",  # Single quotes found but double quotes preferred
     "Q002",  # Single quote docstring found but double quotes preferred
-    "TC002",  # Move third-party import `packaging.requirements.Requirement` into a type-checking block
     "CPY001",  # Missing copyright notice at top of file
 ]
 

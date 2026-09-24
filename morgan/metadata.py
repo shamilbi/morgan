@@ -4,7 +4,7 @@ import email.parser
 import re
 import tarfile
 import zipfile
-from dataclasses import dataclass, field
+from logging import getLogger
 from typing import IO, Any, Callable, Iterable
 
 import tomli
@@ -20,6 +20,8 @@ from morgan.utils import filter_relevant_requirements
 METADATA_VERSION_11 = Version("1.1")
 METADATA_VERSION_12 = Version("1.2")
 METADATA_VERSION_21 = Version("2.1")
+
+LOG = getLogger(__name__)
 
 
 class ParseError(Exception):
@@ -115,8 +117,7 @@ class MetadataParser:
             try:
                 self.parse(opener, member)
             except ParseError as e:
-                # ruff: noqa: T201
-                print(f"\tFailed parsing member {member}: {e}")
+                LOG.warning("\tFailed parsing member %s: %s", member, e)
 
     # ruff: noqa: C901
     def parse(
@@ -375,30 +376,3 @@ class MetadataParser:
     def _add_build_requirements(self, reqs):
         msg = "Setuptools build requirements not supported"
         raise NotImplementedError(msg)
-
-
-@dataclass
-class MetadataCache:
-    # filepath: MetadataParser
-    d: dict[str, MetadataParser] = field(default_factory=dict)
-
-    # statistics
-    # filepath: count
-    # statd: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-
-    def extract_metadata(self, filepath: str) -> MetadataParser:
-        # # stat
-        # self.statd[filepath] += 1
-        # if self.statd[filepath] > 1:  # 2..17 in my test
-        #     print(f'\t{self.statd[filepath]}: {filepath}')
-
-        if filepath in self.d:
-            return self.d[filepath]
-
-        md = MetadataParser(filepath)
-
-        self.d[filepath] = md
-        return md
-
-
-MCACHE = MetadataCache()

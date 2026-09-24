@@ -1,3 +1,453 @@
-import morgan
+from __future__ import annotations
 
-morgan.main()
+import argparse
+import configparser
+import os
+import os.path
+import re
+import traceback
+import urllib.parse
+from logging import getLogger
+from typing import Iterable
+
+import packaging.requirements
+import packaging.specifiers
+import packaging.tags
+import packaging.utils
+import packaging.version
+
+from . import __version__
+from .cache import HashCache, JsonCache, MetadataCache, ReqNamesCache
+from .utils import (
+    SESSION,
+    USER_AGENT,
+    ListExtendingOrderedDict,
+    conf_logging,
+    is_requirement_relevant,
+    touch_file,
+)
+
+PYPI_ADDRESS = "https://pypi.org/simple/"
+PREFERRED_HASH_ALG = "sha256"
+MCACHE = MetadataCache()
+JCACHE = JsonCache()
+HCACHE = HashCache()
+LOG = getLogger('main')
+
+
+class Mirrorer:
+    """
+    Mirrorer is a class that implements the mirroring capabilities of Morgan.
+    A class is used to maintain state, as the mirrorer needs to keep track of
+    packages it already processed in the (very common) case that it encounters
+    them again as dependencies.
+    """
+
+    def __init__(self, args: argparse.Namespace, config: str):
+        """
+        The constructor only needs to path to the package index.
+        """
+
+        # load the configuration from the index_path, and parse the environments
+        # into representations that are easier for the mirrorer to work with
+        self.index_path = args.index_path
+        self.index_url = args.index_url
+        self.prerelease = args.prerelease
+        self.config = configparser.ConfigParser(
+            strict=False,
+            dict_type=ListExtendingOrderedDict,
+            inline_comment_prefixes=('#',),
+        )
+        self.config.read(config)
+        self.envs = {}
+        self._supported_pyversions = []
+        self.whl_tags = []  # list[(interpreter, abi, platform)]
+
+        for key in self.config:
+            m = re.fullmatch(r"env\.(.+)", key)
+            if m:
+                env = self.config[key]
+                env["platform_release"] = ""
+                env["platform_version"] = ""
+                env["implementation_version"] = ""
+                env["extra"] = ""
+                self.envs[m.group(1)] = dict(env)
+                if "python_full_version" in env:
+                    self._supported_pyversions.append(env["python_full_version"])
+                else:
+                    self._supported_pyversions.append(env["python_version"])
+                # whl.tag.*
+                l: list[re.Pattern | None] = []  # list[re.Pattern]
+                for i in ('interpreter', 'abi', 'platform'):
+                    t = env.get(f'whl.tag.{i}', '').strip()
+                    if t:
+                        l.append(re.compile(t))
+                    else:
+                        l.append(None)
+                self.whl_tags.append(l)
+
+        self._processed_pkgs = ReqNamesCache()
+
+    def mirror(self, requirement_string: str):
+        """
+        Mirror a package according to a PEP 508-compliant requirement string.
+        """
+
+        requirement = parse_requirement(requirement_string)
+
+        try:
+            deps = self._mirror(requirement)
+        except urllib.error.HTTPError as err:
+            # fail2ban
+            # urllib.error.HTTPError: HTTP Error 404: Not Found
+            LOG.warning("\tError: %s", err)
+            deps = None
+
+        if deps is None:
+            return
+
+        while len(deps) > 0:
+            next_deps = {}
+            for dep in deps:
+                more_deps = self._mirror(
+                    deps[dep]["requirement"],
+                    required_by=deps[dep]["required_by"],
+                )
+                if more_deps:
+                    next_deps.update(more_deps)
+            deps = next_deps.copy()
+
+    def _mirror(
+        self,
+        requirement: packaging.requirements.Requirement,
+        required_by: packaging.requirements.Requirement | None = None,
+    ) -> dict | None:
+        if self._processed_pkgs.check(requirement):
+            return None
+
+        # Display the cause of 'Skipping...'
+        extras = None
+        if required_by:
+            extras = required_by.extras
+            LOG.info("[%s]: %s", required_by, requirement)
+        else:
+            LOG.info("%s", requirement)
+
+        # Check if requirement is relevant for any environment
+        if not is_requirement_relevant(requirement, self.envs.values(), extras=extras):
+            LOG.info("\tSkipping, not relevant for any environment")
+            self._processed_pkgs.add(requirement)  # Mark as processed
+            return None
+
+        data: dict = JCACHE.get(
+            self.index_url,
+            requirement.name,
+            prerelease=self.prerelease,
+        )
+        response_url = data['response_url']
+
+        files = data["files"]
+
+        # filter and enrich files
+        files = self._filter_files(requirement, files)
+        if files is None:
+            if required_by is None:
+                # PySimpleGUI has moved to a private server
+                LOG.info('\tNo files, check PYPI')
+                return None
+            # this is a dependency, assume the dependency is not relevant
+            # for any of our environments and don't return an error
+            return None
+
+        if not files:
+            msg = f"No files match requirement {requirement}"
+            raise Exception(msg)  # noqa: TRY002
+
+        # download all files
+        depdict = {}
+        for file in files:
+            file["url"] = urllib.parse.urljoin(response_url, file["url"])
+            try:
+                file_deps = self._process_file(requirement, file)
+                if file_deps:
+                    depdict.update(file_deps)
+            except Exception:  # noqa: BLE001
+                LOG.info("\tFailed processing file %s, skipping it", file["filename"])
+                traceback.print_exc()
+                continue
+
+        self._processed_pkgs.add(requirement)
+
+        return depdict
+
+    def _filter_files(
+        self,
+        requirement: packaging.requirements.Requirement,
+        files: Iterable[dict],
+    ) -> list[dict] | None:
+        # keep only files of the latest version that satisfies the
+        # requirement (if requirement doesn't have any version specifiers,
+        # take latest available version)
+        if requirement.specifier is not None:
+            files = list(
+                filter(
+                    lambda file: requirement.specifier.contains(file["version"]),
+                    files,
+                ),
+            )
+
+        if not files:
+            LOG.info("\tSkipping %s, no version matches requirement", requirement)
+            return None
+
+        # Now we only have files that satisfy the requirement, and we need to
+        # filter out files that do not match our environments.
+        files = list(filter(self._matches_environments, files))
+
+        if not files:
+            LOG.info("\tSkipping %s, no file matches environments", requirement)
+            return None
+
+        # Only keep files from the latest version that satisifies all
+        # specifiers and environments
+        latest_version = files[0]["version"]
+        return list(filter(lambda file: file["version"] == latest_version, files))
+
+    def _matches_environments(self, fileinfo: dict) -> bool:
+        req = fileinfo.get("requires-python")
+        if req:
+            # The Python versions in some of our environments must be supported
+            # by this file in order to match.
+            # Some packages specify their required Python versions with a simple
+            # number (e.g. '3') instead of an actual specifier (e.g. '>=3'),
+            # which causes the packaging library to raise an expection. Let's
+            # change such cases to a proper specifier.
+            if req.isdigit():
+                req = f"=={req}"
+            # packaging.specifiers.SpecifierSet(req): Invalid specifier
+            # gssapi: Invalid specifier: '>=3.6.*'
+            # pyzmq: Invalid specifier: '!=3.0*'
+            req = fileinfo["requires-python"] = re.sub(r"([0-9])\.?\*", r"\1", req)
+            try:
+                spec_set = packaging.specifiers.SpecifierSet(req)
+                # for supported_python in self._supported_pyversions:
+                #     if not spec_set.contains(supported_python):
+                #         # file does not support the Python version of one of our
+                #         # environments, reject it
+                #         return False
+                if not any(spec_set.contains(i) for i in self._supported_pyversions):
+                    return False
+            except packaging.specifiers.InvalidSpecifier as e:
+                LOG.info("\tIgnoring %s: %s", fileinfo['filename'], e)
+                return False
+
+        if fileinfo.get("tags"):
+            for tag in fileinfo["tags"]:
+                for t in self.whl_tags:
+                    t2 = zip(t[:3], [tag.interpreter, tag.abi, tag.platform])
+                    if all(i.match(j) for i, j in t2 if i):
+                        return True
+
+            # none of the tags matched, reject this file
+            return False
+
+        return True
+
+    def _process_file(
+        self,
+        requirement: packaging.requirements.Requirement,
+        fileinfo: dict,
+    ) -> dict[str, dict[str, packaging.requirements.Requirement]] | None:
+        filepath = os.path.join(self.index_path, requirement.name, fileinfo["filename"])
+        hashalg = (
+            PREFERRED_HASH_ALG
+            if PREFERRED_HASH_ALG in fileinfo["hashes"]
+            else next(iter(fileinfo["hashes"]))
+        )
+
+        self._download_file(fileinfo, filepath, hashalg)
+
+        md = MCACHE.extract_metadata(filepath)
+
+        deps = md.dependencies(requirement.extras, self.envs.values())
+        if deps is None:
+            return None
+
+        depdict = {}
+        for dep in deps:
+            dep.name = packaging.utils.canonicalize_name(dep.name)
+            # keep the index of the dictionary for the full requirement string to pull in potentially
+            # duplicate requirements like "mylibrary<2,>=1" and "mylibrary>=2,<3" that may come from different
+            # top-level requirements
+            dep_index = str(dep)
+            depdict[dep_index] = {
+                "requirement": dep,
+                "required_by": requirement,
+            }
+        return depdict
+
+    def _download_file(
+        self,
+        fileinfo: dict,
+        target: str,
+        hashalg: str,
+    ) -> bool:
+        exphash = fileinfo["hashes"][hashalg]
+
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+
+        # if target already exists, verify its hash and only download if
+        # there's a mismatch
+        if os.path.exists(target) and HCACHE.check_hash(target, hashalg, exphash):
+            touch_file(target, fileinfo)
+            return True
+
+        LOG.info("\t%s...", fileinfo["url"])
+        headers = {
+            "Accept-Encoding": "gzip",
+        }
+        if USER_AGENT:
+            headers["User-Agent"] = USER_AGENT
+        response = SESSION.get(
+            fileinfo["url"],
+            headers=headers,
+        )
+        response.raise_for_status()
+        with open(target, "wb") as out:
+            out.write(response.content)
+        # LOG.info("done")
+
+        if not HCACHE.check_hash(target, hashalg, exphash):
+            os.remove(target)
+            msg = f'Digest mismatch for {fileinfo["filename"]}. Deleting file {target}.'
+            raise ValueError(msg)
+
+        touch_file(target, fileinfo)
+        return True
+
+
+def parse_requirement(req_string: str) -> packaging.requirements.Requirement:
+    """
+    Parse a requirement string into a packaging.requirements.Requirement object.
+    Also canonicalizes (or "normalizes") the name of the package.
+    """
+
+    req = packaging.requirements.Requirement(req_string)
+    req.name = packaging.utils.canonicalize_name(req.name)
+    return req
+
+
+def mirror(args: argparse.Namespace):
+    """
+    Run the mirror on the package index in the provided path, and based on the
+    morgan.ini configuration file in the index. Copies the server script to the
+    index at the end of the process. This function can safely be called multiple
+    times on the same index path, files are only downloaded if necessary.
+    """
+
+    for c in args.config:
+        LOG.info('-----------------------------------------------')
+        LOG.info('config: %s', c)
+        LOG.info('-----------------------------------------------')
+        m = Mirrorer(args, c)
+        for package in m.config["requirements"]:
+            reqs = m.config["requirements"][package].splitlines()
+            if not reqs:
+                # empty requirements
+                # morgan =
+                m.mirror(f"{package}")
+            else:
+                # multiline requirements
+                # urllib3 =
+                #   <1.27
+                #   >=2
+                #   [brotli]
+                for req_ in reqs:
+                    req = req_.strip()
+                    m.mirror(f"{package}{req}")
+
+
+def create_arg_parser() -> argparse.ArgumentParser:
+    def my_url(arg):
+        # url -> url/ without params
+        # https://stackoverflow.com/a/73719022
+        arg = arg.rstrip("/")
+        url = urllib.parse.urlparse(arg)
+        if all((url.scheme, url.netloc)):
+            return f"{url.scheme}://{url.netloc}{url.path}/"
+        msg = "Invalid URL"
+        raise argparse.ArgumentTypeError(msg)
+
+    parser = argparse.ArgumentParser(
+        description=f"morgan v{__version__}: PyPI Mirror for Restricted Environments",
+    )
+
+    parser.add_argument(
+        "-i",
+        "--index-path",
+        dest="index_path",
+        default=os.getcwd(),
+        help="Path to the package index",
+    )
+    parser.add_argument(
+        "-I",
+        "--index-url",
+        dest="index_url",
+        default=PYPI_ADDRESS,
+        type=my_url,
+        help=f"Base URL of the Python Package Index (default: {PYPI_ADDRESS})",
+    )
+
+    # one request cache for all configs
+    parser.add_argument(
+        "-c",
+        "--config",
+        dest="config",
+        nargs="*",
+        help="Config files (default: <INDEX_PATH>/morgan.ini)",
+    )
+    parser.add_argument(
+        "--prerelease",
+        action="store_true",
+        help="download prerelease too (dev, a, b, rc)",
+    )
+
+    return parser
+
+
+def main():
+    """
+    Executes the command line interface of Morgan. Use -h for a full list of
+    flags, options and arguments.
+    """
+    conf_logging()
+
+    parser = create_arg_parser()
+
+    parser.add_argument(
+        "command",
+        choices=[
+            "mirror",
+        ],
+        help="Command to execute",
+    )
+
+    args = parser.parse_args()
+
+    if not args.config:
+        args.config = [
+            os.path.join(args.index_path, "morgan.ini"),
+        ]
+    for c in args.config:
+        if not os.path.isfile(c):
+            # If a file named in filenames cannot be opened, that file will be ignored
+            # https://docs.python.org/3.12/library/configparser.html#configparser.ConfigParser.read
+            msg = f"Invalid config: {c}"
+            raise argparse.ArgumentTypeError(msg)
+
+    if args.command == "mirror":
+        mirror(args)
+
+
+if __name__ == "__main__":
+    main()
