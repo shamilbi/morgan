@@ -26,20 +26,18 @@
 Morgan is a PyPI mirror for restricted/offline networks/environments, where
 access to the Internet is not available. It allows creating small mirrors that
 can be used by multiple "client" Python environments (i.e. CPython versions,
-operating systems, etc.). The Morgan server is a single-file script that only
-uses modules the standard Python library, making it easy to deploy in such
-environments.
+operating systems, etc.).
 
 The basic idea is to run the mirror utility where Internet access is available—which
 generates a directory tree ("package index") with all of the required packages,
-their dependencies, and the server script—then copy this tree to the restricted
-network (going through whatever security policies are in place), run the server
+their dependencies,then copy this tree to the restricted
+network (going through whatever security policies are in place), run a server
 inside the restricted network, and set `pip` in the client environments to use
 the mirror instead of pypi.org, which they can't access anyway.
 
 ## Features and Concepts
 
-- Runs under **Python 3.7 and up** (both server and mirrorer).
+- Runs under **Python 3.8 and up**.
 - Package index is a **simple directory tree** that can be easily archived, copied,
   rsynced, etc.
 - Package index contains a **configuration file** that lists **markers** for
@@ -55,12 +53,6 @@ the mirror instead of pypi.org, which they can't access anyway.
 - Downloads both **source distributions** and **binary distributions**. Only binary
   distributions that are relevant to either of the environment markers defined in
   the configuration file are downloaded.
-- **Server** is a one-file script with **no dependencies** outside the standard library
-  available in Python 3.7 and above. The script is automatically extracted into
-  the package index.
-- Server implements [PEP 503](https://peps.python.org/pep-0503/) (Simple Repository API),
-  [PEP 658](https://peps.python.org/pep-0658/) (Serve Distribution Metadata in the Simple Repository API),
-  and [PEP 691](https://peps.python.org/pep-0691/) (JSON-based Simple API for Python Package Indexes).
 
 ## Installation
 
@@ -90,8 +82,8 @@ python3 -m pip install morgan
 3. Run the mirrorer from inside the package index via `morgan mirror` (alternatively,
    provide the path of the package index via the `--index-path` flag).
 4. Copy the package index to the target environment, if necessary.
-5. Run the server using `python3 server.py`. Use `--help` for a full list of
-   flags and options. You can also use `morgan server` instead.
+5. Run a server using `python3 -m http.server --bind "$host" "$port" &\>/dev/null &`.
+    
 
 ### Sample Configuration File
 
@@ -224,9 +216,6 @@ issues.
 - The only binary distributions supported are wheels. Eggs are not supported and
   probably never will be.
 
-- The Morgan server is currently read-only. Packages cannot be published to the
-  index through it. This may change in the future.
-
 - Morgan does not mirror packages with versions that do not comply with
   [PEP 440](https://peps.python.org/pep-0440/#version-scheme).
   These are generally older packages that are no longer accepted by PyPI anyway.
@@ -267,11 +256,10 @@ Morgan was written because of insufficiencies of other mirroring solutions:
   If `pip` fails with a message similar to "ERROR: Could not find a version
   that satisfies the requirement FastAPI (from versions: 0.88.0)", despite
   package files existing with the correct version and platform, it may be
-  that you're providing `pip` with a non-normalized name. You can either
+  that you're providing `pip` with a non-normalized name. You can
   use the normalized name when installing (lowercase the package name and
   replace underscores with dashes, e.g. `pip install fastapi` instead of
-  `pip install FastAPI`), or start the server with the `--no-metadata` flag,
-  which will disable serving metadata files and workaround the issue. This seems
+  `pip install FastAPI`). This seems
   to be a non-standard behavior in `pip`, as it is sending the normalized name
   to the server, but for some reason expecting to get the non-normalized name
   back.
