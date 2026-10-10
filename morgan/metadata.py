@@ -15,17 +15,13 @@ from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import Version
 
-from morgan.utils import filter_relevant_requirements
+from .utils import ParseError, filter_relevant_requirements
 
 METADATA_VERSION_11 = Version("1.1")
 METADATA_VERSION_12 = Version("1.2")
 METADATA_VERSION_21 = Version("2.1")
 
 LOG = getLogger(__name__)
-
-
-class ParseError(Exception):
-    pass
 
 
 class MetadataParser:
