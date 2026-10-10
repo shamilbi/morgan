@@ -22,6 +22,7 @@ from .utils import (
     SESSION,
     USER_AGENT,
     ListExtendingOrderedDict,
+    MorganError,
     conf_logging,
     is_requirement_relevant,
     touch_file,
@@ -161,7 +162,7 @@ class Mirrorer:
 
         if not files:
             msg = f"No files match requirement {requirement}"
-            raise Exception(msg)  # noqa: TRY002
+            raise MorganError(msg)
 
         # download all files
         depdict = {}
