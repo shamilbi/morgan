@@ -20,6 +20,14 @@ USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:148.0) Gecko/20100101 Firefox/1
 SESSION = requests.Session()
 
 
+class MorganError(Exception):
+    pass
+
+
+class ParseError(MorganError):
+    pass
+
+
 def to_single_dash(filename):
     """https://packaging.python.org/en/latest/specifications/version-specifiers/#version-specifiers"""
 
