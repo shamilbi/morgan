@@ -423,15 +423,6 @@ def main():
     conf_logging()
 
     parser = create_arg_parser()
-
-    parser.add_argument(
-        "command",
-        choices=[
-            "mirror",
-        ],
-        help="Command to execute",
-    )
-
     args = parser.parse_args()
 
     if not args.config:
@@ -445,8 +436,7 @@ def main():
             msg = f"Invalid config: {c}"
             raise argparse.ArgumentTypeError(msg)
 
-    if args.command == "mirror":
-        mirror(args)
+    mirror(args)
 
 
 if __name__ == "__main__":
