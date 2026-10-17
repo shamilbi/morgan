@@ -45,47 +45,54 @@ class Mirrorer:
     """
 
     def __init__(self, args: argparse.Namespace, config: str):
-        """
-        The constructor only needs to path to the package index.
-        """
-
         # load the configuration from the index_path, and parse the environments
         # into representations that are easier for the mirrorer to work with
         self.index_path = args.index_path
         self.index_url = args.index_url
         self.prerelease = args.prerelease
-        self.config = configparser.ConfigParser(
+
+        parser = configparser.ConfigParser(
             strict=False,
             dict_type=ListExtendingOrderedDict,
             inline_comment_prefixes=('#',),
         )
-        self.config.read(config)
+        parser.read(config)
+
         self.envs = {}
         self._supported_pyversions = []
         self.whl_tags = []  # list[(interpreter, abi, platform)]
 
-        for key in self.config:
-            m = re.fullmatch(r"env\.(.+)", key)
-            if m:
-                env = self.config[key]
-                env["platform_release"] = ""
-                env["platform_version"] = ""
-                env["implementation_version"] = ""
-                env["extra"] = ""
-                self.envs[m.group(1)] = dict(env)
-                if "python_full_version" in env:
-                    self._supported_pyversions.append(env["python_full_version"])
+        # [local]
+        # no-deps = true
+        # do not check dependencies
+        self.no_deps = parser.getboolean('local', 'no-deps', fallback=False)
+
+        self.requirements = parser['requirements']
+
+        # [env.*]
+        prefix = 'env.'
+        len_ = len(prefix)
+        for section in parser:
+            if not section.startswith(prefix) or not len(section) > len_:
+                continue
+            env = self.envs[section[len_:]] = dict(parser[section])
+            env["platform_release"] = ""
+            env["platform_version"] = ""
+            env["implementation_version"] = ""
+            env["extra"] = ""
+            if "python_full_version" in env:
+                self._supported_pyversions.append(env["python_full_version"])
+            else:
+                self._supported_pyversions.append(env["python_version"])
+            # whl.tag.*
+            l: list[re.Pattern | None] = []  # list[re.Pattern]
+            for i in ('interpreter', 'abi', 'platform'):
+                t = env.get(f'whl.tag.{i}', '').strip()
+                if t:
+                    l.append(re.compile(t))
                 else:
-                    self._supported_pyversions.append(env["python_version"])
-                # whl.tag.*
-                l: list[re.Pattern | None] = []  # list[re.Pattern]
-                for i in ('interpreter', 'abi', 'platform'):
-                    t = env.get(f'whl.tag.{i}', '').strip()
-                    if t:
-                        l.append(re.compile(t))
-                    else:
-                        l.append(None)
-                self.whl_tags.append(l)
+                    l.append(None)
+            self.whl_tags.append(l)
 
         self._processed_pkgs = ReqNamesCache()
 
@@ -104,7 +111,7 @@ class Mirrorer:
             LOG.warning("\tError: %s", err)
             deps = None
 
-        if deps is None:
+        if self.no_deps or deps is None:
             return
 
         while len(deps) > 0:
@@ -346,13 +353,15 @@ def mirror(args: argparse.Namespace):
     times on the same index path, files are only downloaded if necessary.
     """
 
+    LOG.info('morgan v%s', __version__)
+
     for c in args.config:
         LOG.info('-----------------------------------------------')
         LOG.info('config: %s', c)
         LOG.info('-----------------------------------------------')
         m = Mirrorer(args, c)
-        for package in m.config["requirements"]:
-            reqs = m.config["requirements"][package].splitlines()
+        for package in m.requirements:
+            reqs = m.requirements[package].splitlines()
             if not reqs:
                 # empty requirements
                 # morgan =
